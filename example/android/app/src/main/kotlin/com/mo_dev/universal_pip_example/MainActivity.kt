@@ -1,5 +1,5 @@
 package com.mo_dev.universal_pip_example
 
-import io.flutter.embedding.android.FlutterActivity
+import com.mo_dev.universal_pip.UniversalPipActivity
 
-class MainActivity : FlutterActivity()
+class MainActivity : UniversalPipActivity()

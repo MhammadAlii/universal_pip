@@ -1,5 +1,5 @@
 name: universal_pip
-description: "A new Flutter plugin project."
+description: "A universal Flutter Picture-in-Picture controller with in-app PiP, Android system PiP, and web/iOS-safe fallbacks."
 version: 0.0.1
 homepage:
 
@@ -44,7 +44,7 @@ flutter:
         pluginClass: UniversalPipPlugin
       web:
         pluginClass: UniversalPipWeb
-        fileName: universal_pip_web.dart
+        fileName: src/platform/universal_pip_web.dart
 
   # To add assets to your plugin package, add an assets section, like this:
   # assets:

@@ -7,13 +7,9 @@ import android.content.pm.PackageManager
 import android.graphics.Rect
 import android.os.Build
 import android.util.Rational
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.LifecycleOwner
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
-import io.flutter.embedding.engine.plugins.lifecycle.FlutterLifecycleAdapter
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -23,23 +19,19 @@ class UniversalPipPlugin :
     FlutterPlugin,
     MethodChannel.MethodCallHandler,
     EventChannel.StreamHandler,
-    ActivityAware {
+    ActivityAware,
+    UniversalPipModeListener {
     private lateinit var methodChannel: MethodChannel
     private lateinit var eventChannel: EventChannel
 
     private var activity: Activity? = null
-    private var lifecycle: Lifecycle? = null
     private var eventSink: EventChannel.EventSink? = null
     private var pipEnabled = false
     private var aspectRatio = 16.0 / 9.0
+    private var seamlessResizeEnabled = true
+    private var autoEnterOnUserLeave = true
     private var sourceRectHint: Rect? = null
-
-    private val lifecycleObserver =
-        LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME || event == Lifecycle.Event.ON_PAUSE) {
-                emitPipMode()
-            }
-        }
+    private var lastError: String? = null
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         methodChannel = MethodChannel(binding.binaryMessenger, "universal_pip/methods")
@@ -56,9 +48,8 @@ class UniversalPipPlugin :
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         activity = binding.activity
-        lifecycle = FlutterLifecycleAdapter.getActivityLifecycle(binding).also {
-            it.addObserver(lifecycleObserver)
-        }
+        UniversalPipModeDispatcher.addListener(this)
+        emitPipMode()
     }
 
     override fun onDetachedFromActivityForConfigChanges() {
@@ -76,12 +67,18 @@ class UniversalPipPlugin :
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "isSystemPipSupported" -> result.success(isPipSupported())
+            "getLastSystemPipError" -> result.success(lastError)
             "configureSystemPip" -> {
                 pipEnabled = call.argument<Boolean>("enabled") == true
                 aspectRatio = call.argument<Double>("aspectRatio") ?: aspectRatio
+                seamlessResizeEnabled =
+                    call.argument<Boolean>("androidSeamlessResize") ?: seamlessResizeEnabled
+                autoEnterOnUserLeave =
+                    call.argument<Boolean>("androidAutoEnterOnUserLeave") ?: autoEnterOnUserLeave
                 updatePipParams()
                 result.success(null)
             }
+            "setNativeContent" -> result.success(null)
             "updateSourceRectHint" -> {
                 sourceRectHint = sourceRectFromCall(call)
                 updatePipParams()
@@ -102,28 +99,34 @@ class UniversalPipPlugin :
         eventSink = null
     }
 
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
+        eventSink?.success(isInPictureInPictureMode)
+    }
+
     private fun detachActivity() {
-        lifecycle?.removeObserver(lifecycleObserver)
-        lifecycle = null
+        UniversalPipModeDispatcher.removeListener(this)
         activity = null
     }
 
     private fun enterPip(): Boolean {
-        val currentActivity = activity ?: return false
-        if (!pipEnabled || !isPipSupported()) return false
+        val currentActivity = activity ?: return fail("No Android activity is attached.")
+        if (!pipEnabled) return fail("Android PiP is not enabled in the current configuration.")
+        if (!isPipSupported()) return fail("Android Picture-in-Picture is not supported on this device or API level.")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
             currentActivity.isInPictureInPictureMode
         ) {
+            lastError = null
             emitPipMode()
             return true
         }
 
         return try {
             val entered = currentActivity.enterPictureInPictureMode(buildPipParams())
+            if (entered) lastError = null
             emitPipMode()
             entered
         } catch (_: Exception) {
-            false
+            fail("Android rejected the Picture-in-Picture request.")
         }
     }
 
@@ -142,11 +145,18 @@ class UniversalPipPlugin :
                 addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
             }
             currentActivity.startActivity(intent)
+            lastError = null
             emitPipMode()
             true
         } catch (_: Exception) {
-            false
+            fail("Android could not restore the activity from Picture-in-Picture.")
         }
+    }
+
+    private fun fail(message: String): Boolean {
+        lastError = message
+        emitPipMode()
+        return false
     }
 
     private fun updatePipParams() {
@@ -168,7 +178,8 @@ class UniversalPipPlugin :
         sourceRectHint?.let { builder.setSourceRectHint(it) }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            builder.setAutoEnterEnabled(pipEnabled)
+            builder.setAutoEnterEnabled(pipEnabled && autoEnterOnUserLeave)
+            builder.setSeamlessResizeEnabled(seamlessResizeEnabled)
         }
 
         return builder.build()
