@@ -14,9 +14,9 @@ Android system PiP, and safe iOS/web fallbacks.
   s.license          = { :file => '../LICENSE' }
   s.author           = { 'Your Company' => 'email@example.com' }
   s.source           = { :path => '.' }
-  s.source_files = 'universal_pip/Sources/universal_pip/**/*.swift'
+  s.source_files = 'Classes/**/*.swift'
   s.resource_bundles = {
-    'universal_pip_privacy' => ['universal_pip/Sources/universal_pip/PrivacyInfo.xcprivacy']
+    'universal_pip_privacy' => ['Resources/PrivacyInfo.xcprivacy']
   }
   s.dependency 'Flutter'
   s.platform = :ios, '13.0'
