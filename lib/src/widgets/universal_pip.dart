@@ -37,9 +37,12 @@ class UniversalPip extends StatefulWidget {
 
   final UniversalPipController controller;
   final UniversalPipConfig config;
-  final UniversalPipBuilder inAppBuilder;
-  final NativePipContentBuilder? nativeContentBuilder;
-  final NativePipSurfaceBuilder? nativeSurfaceBuilder;
+  final UniversalPipBuilder
+  inAppBuilder; // UI for Flutter draggable PiP inside the app
+  final NativePipContentBuilder?
+  nativeContentBuilder; // data/model for native system PiP
+  final NativePipSurfaceBuilder?
+  nativeSurfaceBuilder; // custom UI preview/surface for that native PiP content
   final Widget child;
 
   @override
@@ -76,6 +79,11 @@ class _UniversalPipState extends State<UniversalPip>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      if (widget.controller.state.isSystemPipActive &&
+          defaultTargetPlatform == TargetPlatform.iOS) {
+        unawaited(_restoreSystemPipToAppPip());
+        return;
+      }
       if (!widget.controller.state.isSystemPipActive) {
         widget.controller.restoreInAppPip();
       }
@@ -113,6 +121,11 @@ class _UniversalPipState extends State<UniversalPip>
     } finally {
       _isAutoEnteringSystemPip = false;
     }
+  }
+
+  Future<void> _restoreSystemPipToAppPip() async {
+    await widget.controller.exitSystemPip();
+    widget.controller.restoreInAppPip();
   }
 
   @override
@@ -231,13 +244,12 @@ class _UniversalPipState extends State<UniversalPip>
   }
 
   void _handleControllerChanged() {
-    unawaited(_prepareAndroidSystemPip());
+    unawaited(_prepareSystemPip());
     if (mounted) setState(() {});
   }
 
-  Future<void> _prepareAndroidSystemPip() async {
+  Future<void> _prepareSystemPip() async {
     if (_isPreparingSystemPip) return;
-    if (defaultTargetPlatform != TargetPlatform.android) return;
     if (!widget.config.enableSystemPip) return;
     if (!widget.controller.state.isVisible) return;
 

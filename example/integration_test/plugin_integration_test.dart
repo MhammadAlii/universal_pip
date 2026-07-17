@@ -14,11 +14,10 @@ import 'package:universal_pip/universal_pip.dart';
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('getPlatformVersion test', (WidgetTester tester) async {
-    final UniversalPip plugin = UniversalPip();
-    final String? version = await plugin.getPlatformVersion();
-    // The version string depends on the host platform running the test, so
-    // just assert that some non-empty string is returned.
-    expect(version?.isNotEmpty, true);
+  testWidgets('system PiP support returns a boolean', (tester) async {
+    final controller = UniversalPipController();
+    addTearDown(controller.dispose);
+
+    expect(await controller.isSystemPipSupported, isA<bool>());
   });
 }

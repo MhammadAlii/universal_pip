@@ -4,6 +4,15 @@ import '../models/native_pip_content.dart';
 
 enum UniversalPipMode { hidden, foreground, inApp, system }
 
+// * hidden
+// Nothing is shown. PiP is closed.
+// * foreground
+// The content is active in the app, usually on the full call/player screen. No small bubble is shown, but the controller remembers the content so it can enter native PiP if needed.
+// * inApp
+// The small draggable Flutter PiP bubble is shown inside the app. This uses inAppBuilder.
+// * system
+// The app is entering or already inside native OS PiP. On Android this uses the app Activity surface; on iOS this uses native AVKit content.
+
 class UniversalPipState {
   const UniversalPipState({
     required this.mode,
