@@ -329,13 +329,7 @@ public class UniversalPipPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, 
   }
 
   private func fallbackSourceRect(in rootView: UIView) -> CGRect {
-    let size = CGSize(width: 2, height: 2)
-    return CGRect(
-      x: max(rootView.bounds.maxX - size.width, 0),
-      y: max(rootView.bounds.maxY - size.height, 0),
-      width: size.width,
-      height: size.height
-    )
+    rootView.bounds
   }
 
   private func attachSourceView() -> UIView? {
@@ -791,6 +785,16 @@ public class UniversalPipPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, 
   public func pictureInPictureControllerWillStopPictureInPicture(
     _ pictureInPictureController: AVPictureInPictureController
   ) {}
+
+  public func pictureInPictureController(
+    _ pictureInPictureController: AVPictureInPictureController,
+    restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void
+  ) {
+    emitPipMode(false)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+      completionHandler(true)
+    }
+  }
 
   public func pictureInPictureControllerDidStopPictureInPicture(
     _ pictureInPictureController: AVPictureInPictureController

@@ -103,6 +103,8 @@ void main() {
       'backgroundColor': null,
       'fallbackBackgroundColor': null,
       'profileBackgroundColor': null,
+      'iosPreferredContentSize': null,
+      'iosLocalPreviewWidthRatio': null,
       'participants': [
         {
           'id': 'remote',
