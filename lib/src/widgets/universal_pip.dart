@@ -14,8 +14,11 @@ import 'native_pip_content_surface.dart';
 typedef UniversalPipBuilder =
     Widget Function(BuildContext context, UniversalPipState state);
 
-typedef NativePipContentBuilder =
-    NativePipContent? Function(BuildContext context, UniversalPipState state);
+typedef WebPipBuilder =
+    Widget Function(BuildContext context, UniversalPipState state);
+
+typedef WebDocumentPipDomBuilder =
+    void Function(Object pipWindow, UniversalPipState state);
 
 typedef NativePipSurfaceBuilder =
     Widget Function(
@@ -30,19 +33,32 @@ class UniversalPip extends StatefulWidget {
     required this.inAppBuilder,
     required this.child,
     this.config = const UniversalPipConfig(),
-    this.nativeContentBuilder,
+    this.webInAppBuilder,
+    this.webDocumentPipDomBuilder,
     this.nativeSurfaceBuilder,
     super.key,
   });
 
   final UniversalPipController controller;
   final UniversalPipConfig config;
-  final UniversalPipBuilder
-  inAppBuilder; // UI for Flutter draggable PiP inside the app
-  final NativePipContentBuilder?
-  nativeContentBuilder; // data/model for native system PiP
-  final NativePipSurfaceBuilder?
-  nativeSurfaceBuilder; // custom UI preview/surface for that native PiP content
+
+  /// Builds the draggable Flutter PiP shown inside the app.
+  final UniversalPipBuilder inAppBuilder;
+
+  /// Builds the draggable Flutter PiP inside the browser tab on web.
+  ///
+  /// Falls back to [inAppBuilder] when omitted.
+  final WebPipBuilder? webInAppBuilder;
+
+  /// Renders content inside the separate browser Document PiP window.
+  ///
+  /// This receives a browser-specific window object on web. It must create DOM
+  /// content rather than Flutter widgets because the window has its own DOM.
+  final WebDocumentPipDomBuilder? webDocumentPipDomBuilder;
+
+  /// Builds the Flutter preview surface used during native/system PiP handoff.
+  final NativePipSurfaceBuilder? nativeSurfaceBuilder;
+
   final Widget child;
 
   @override
@@ -53,48 +69,64 @@ class _UniversalPipState extends State<UniversalPip>
     with WidgetsBindingObserver {
   bool _isAutoEnteringSystemPip = false;
   bool _isPreparingSystemPip = false;
+  bool _hasPendingSystemPipPreparation = false;
+  Object? _lastWebDocumentPipWindow;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     widget.controller.addListener(_handleControllerChanged);
+    _configureWebAutoEntry();
   }
 
   @override
   void didUpdateWidget(covariant UniversalPip oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.controller == widget.controller) return;
-    oldWidget.controller.removeListener(_handleControllerChanged);
-    widget.controller.addListener(_handleControllerChanged);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_handleControllerChanged);
+      widget.controller.addListener(_handleControllerChanged);
+    }
+    _configureWebAutoEntry();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     widget.controller.removeListener(_handleControllerChanged);
+    widget.controller.setWebAutoEnterHandler(null);
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    debugPrint(
+      '[UniversalPip] lifecycle=$state mode=${widget.controller.state.mode.name} '
+      'system=${widget.controller.state.isSystemPipActive}',
+    );
+    // Chrome invokes the registered Media Session action when Auto PiP is
+    // available; ordinary browser lifecycle events cannot create the window.
+    if (kIsWeb) return;
+
     if (state == AppLifecycleState.resumed) {
       if (widget.controller.state.isSystemPipActive &&
           defaultTargetPlatform == TargetPlatform.iOS) {
-        unawaited(_restoreSystemPipToAppPip());
+        unawaited(_exitSystemPipAndRestore());
         return;
       }
-      if (!widget.controller.state.isSystemPipActive) {
-        widget.controller.restoreInAppPip();
+      if (widget.controller.state.mode == UniversalPipMode.system ||
+          widget.controller.state.isTransitioning) {
+        widget.controller.restoreAfterSystemPipExit();
       }
       return;
     }
 
-    final nativePipEnabled =
-        widget.config.enableSystemPip || widget.config.enableWebDocumentPip;
+    final nativePipEnabled = widget.config.enableSystemPip;
     if (!nativePipEnabled ||
         !widget.config.autoEnterSystemPip ||
-        !widget.controller.state.isVisible) {
+        !widget.controller.state.isVisible ||
+        widget.controller.state.isSystemPipActive ||
+        widget.controller.state.isTransitioning) {
       return;
     }
 
@@ -107,34 +139,63 @@ class _UniversalPipState extends State<UniversalPip>
   }
 
   Future<void> _enterSystemPipFromLifecycle() async {
-    if (_isAutoEnteringSystemPip) return;
+    if (_isAutoEnteringSystemPip) {
+      debugPrint('[UniversalPip] auto entry already in progress');
+      return;
+    }
 
     _isAutoEnteringSystemPip = true;
     try {
-      await widget.controller.enterSystemPip(
+      final entered = await widget.controller.enterSystemPip(
         aspectRatio: widget.config.aspectRatio,
         preRenderSystemSurface:
             widget.config.preRenderSystemSurfaceBeforeSystemPip,
         androidSeamlessResize: widget.config.androidSeamlessResize,
         androidAutoEnterOnUserLeave: widget.config.androidAutoEnterOnUserLeave,
       );
+      debugPrint('[UniversalPip] auto entry completed entered=$entered');
     } finally {
       _isAutoEnteringSystemPip = false;
     }
   }
 
-  Future<void> _restoreSystemPipToAppPip() async {
+  void _configureWebAutoEntry() {
+    if (!kIsWeb) return;
+
+    final shouldRegister =
+        widget.config.enableWebDocumentPip &&
+        widget.config.autoEnterSystemPip &&
+        widget.webDocumentPipDomBuilder != null;
+    widget.controller.setWebAutoEnterHandler(
+      shouldRegister ? _enterWebDocumentPipFromBrowser : null,
+    );
+  }
+
+  Future<void> _enterWebDocumentPipFromBrowser() async {
+    final state = widget.controller.state;
+    if (!state.isVisible || state.isSystemPipActive || state.isTransitioning) {
+      return;
+    }
+
+    final entered = await widget.controller.enterSystemPip(
+      aspectRatio: widget.config.aspectRatio,
+      preRenderSystemSurface: false,
+    );
+    debugPrint('[UniversalPip] browser auto entry completed entered=$entered');
+  }
+
+  Future<void> _exitSystemPipAndRestore() async {
     await widget.controller.exitSystemPip();
-    widget.controller.restoreInAppPip();
+    widget.controller.restoreAfterSystemPipExit();
   }
 
   @override
   Widget build(BuildContext context) {
     final state = widget.controller.state;
-    final content =
-        widget.nativeContentBuilder?.call(context, state) ?? state.content;
+    final content = state.content;
     final showSystemSurface =
         content != null && _shouldShowSystemSurface(state);
+    final showWebDocumentSurface = _shouldShowWebDocumentSurface(state);
 
     return Directionality(
       textDirection: Directionality.maybeOf(context) ?? TextDirection.ltr,
@@ -146,14 +207,18 @@ class _UniversalPipState extends State<UniversalPip>
             _buildTransitionBackdrop(),
           if (showSystemSurface)
             _buildSystemSurfaceOverlay(context, state, content),
-          if (state.showInAppPip && !showSystemSurface)
+          if (showWebDocumentSurface)
+            _buildWebDocumentSurfaceOverlay(context, state),
+          if (state.showInAppPip &&
+              !showSystemSurface &&
+              !showWebDocumentSurface)
             DraggablePipOverlay(
               config: widget.config,
               bounds: state.bounds ?? widget.config.initialBounds,
               onRectChanged: widget.controller.setBounds,
               child: ClipRRect(
                 borderRadius: widget.config.borderRadius,
-                child: widget.inAppBuilder(context, state),
+                child: _buildInAppSurface(context, state),
               ),
             ),
         ],
@@ -233,10 +298,54 @@ class _UniversalPipState extends State<UniversalPip>
     return NativePipContentSurface(content: content);
   }
 
+  Widget _buildInAppSurface(BuildContext context, UniversalPipState state) {
+    if (kIsWeb) {
+      final webBuilder = widget.webInAppBuilder;
+      if (webBuilder != null) {
+        return webBuilder(context, state);
+      }
+    }
+    return widget.inAppBuilder(context, state);
+  }
+
+  Widget _buildWebDocumentSurfaceOverlay(
+    BuildContext context,
+    UniversalPipState state,
+  ) {
+    final surface = _buildWebDocumentSurface(context, state);
+    final transitionBounds = _surfaceBoundsFor(state);
+    if (transitionBounds == null) {
+      return Positioned.fill(child: surface);
+    }
+
+    return Positioned.fromRect(
+      rect: transitionBounds,
+      child: ClipRRect(
+        borderRadius: widget.config.borderRadius,
+        child: surface,
+      ),
+    );
+  }
+
+  Widget _buildWebDocumentSurface(
+    BuildContext context,
+    UniversalPipState state,
+  ) {
+    final builder = widget.webInAppBuilder ?? widget.inAppBuilder;
+    return builder(context, state);
+  }
+
   bool _shouldShowSystemSurface(UniversalPipState state) {
+    if (kIsWeb) return false;
     if (state.isTransitioning) return true;
     return state.isSystemPipActive &&
         defaultTargetPlatform == TargetPlatform.android;
+  }
+
+  bool _shouldShowWebDocumentSurface(UniversalPipState state) {
+    return kIsWeb &&
+        widget.config.enableWebDocumentPip &&
+        state.isTransitioning;
   }
 
   bool _shouldUseBoundedSystemSurface(UniversalPipState state) {
@@ -245,21 +354,53 @@ class _UniversalPipState extends State<UniversalPip>
 
   void _handleControllerChanged() {
     unawaited(_prepareSystemPip());
+    _renderWebDocumentPip();
     if (mounted) setState(() {});
   }
 
+  void _renderWebDocumentPip() {
+    if (!kIsWeb ||
+        !widget.controller.state.isSystemPipActive ||
+        widget.webDocumentPipDomBuilder == null) {
+      _lastWebDocumentPipWindow = null;
+      return;
+    }
+
+    final pipWindow = widget.controller.systemPipWindow;
+    if (pipWindow == null || identical(pipWindow, _lastWebDocumentPipWindow)) {
+      return;
+    }
+
+    _lastWebDocumentPipWindow = pipWindow;
+    try {
+      widget.webDocumentPipDomBuilder!(pipWindow, widget.controller.state);
+    } catch (error) {
+      debugPrint('[UniversalPip] failed to build Document PiP content: $error');
+    }
+  }
+
   Future<void> _prepareSystemPip() async {
-    if (_isPreparingSystemPip) return;
-    if (!widget.config.enableSystemPip) return;
+    if (_isPreparingSystemPip) {
+      _hasPendingSystemPipPreparation = true;
+      return;
+    }
+    final pipEnabled = kIsWeb
+        ? widget.config.enableWebDocumentPip
+        : widget.config.enableSystemPip;
+    if (!pipEnabled) return;
     if (!widget.controller.state.isVisible) return;
 
     _isPreparingSystemPip = true;
     try {
-      await widget.controller.prepareSystemPip(
-        aspectRatio: widget.config.aspectRatio,
-        androidSeamlessResize: widget.config.androidSeamlessResize,
-        androidAutoEnterOnUserLeave: widget.config.androidAutoEnterOnUserLeave,
-      );
+      do {
+        _hasPendingSystemPipPreparation = false;
+        await widget.controller.prepareSystemPip(
+          aspectRatio: widget.config.aspectRatio,
+          androidSeamlessResize: widget.config.androidSeamlessResize,
+          androidAutoEnterOnUserLeave:
+              widget.config.androidAutoEnterOnUserLeave,
+        );
+      } while (_hasPendingSystemPipPreparation);
     } finally {
       _isPreparingSystemPip = false;
     }

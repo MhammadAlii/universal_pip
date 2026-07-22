@@ -11,14 +11,12 @@ class NativePipContentSurface extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ColoredBox(
-      color: const Color(0xFF111418),
+      color: content.videoCallBackgroundColor ?? const Color(0xFF111418),
       child: switch (content.type) {
         NativePipContentType.videoPlayer => _VideoPlayerSurface(
           content: content,
         ),
-        NativePipContentType.videoCall => _VideoCallSurface(
-          participants: content.participants,
-        ),
+        NativePipContentType.videoCall => _VideoCallSurface(content: content),
       },
     );
   }
@@ -51,9 +49,11 @@ class _VideoPlayerSurface extends StatelessWidget {
 }
 
 class _VideoCallSurface extends StatelessWidget {
-  const _VideoCallSurface({required this.participants});
+  const _VideoCallSurface({required this.content});
 
-  final List<PipParticipant> participants;
+  final NativePipContent content;
+
+  List<PipParticipant> get participants => content.participants;
 
   @override
   Widget build(BuildContext context) {
@@ -70,7 +70,7 @@ class _VideoCallSurface extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
-        _ParticipantTile(participant: mainParticipant),
+        _ParticipantTile(participant: mainParticipant, content: content),
         if (localParticipant != null &&
             localParticipant.id != mainParticipant.id)
           PositionedDirectional(
@@ -92,7 +92,10 @@ class _VideoCallSurface extends StatelessWidget {
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(15),
-                child: _ParticipantTile(participant: localParticipant),
+                child: _ParticipantTile(
+                  participant: localParticipant,
+                  content: content,
+                ),
               ),
             ),
           ),
@@ -112,9 +115,10 @@ class _VideoCallSurface extends StatelessWidget {
 }
 
 class _ParticipantTile extends StatelessWidget {
-  const _ParticipantTile({required this.participant});
+  const _ParticipantTile({required this.participant, required this.content});
 
   final PipParticipant participant;
+  final NativePipContent content;
 
   @override
   Widget build(BuildContext context) {
@@ -129,18 +133,19 @@ class _ParticipantTile extends StatelessWidget {
         avatarUrl,
         fit: BoxFit.cover,
         errorBuilder: (context, error, stackTrace) =>
-            _AvatarFallback(participant: participant),
+            _AvatarFallback(participant: participant, content: content),
       );
     }
 
-    return _AvatarFallback(participant: participant);
+    return _AvatarFallback(participant: participant, content: content);
   }
 }
 
 class _AvatarFallback extends StatelessWidget {
-  const _AvatarFallback({required this.participant});
+  const _AvatarFallback({required this.participant, required this.content});
 
   final PipParticipant participant;
+  final NativePipContent content;
 
   @override
   Widget build(BuildContext context) {
@@ -148,24 +153,38 @@ class _AvatarFallback extends StatelessWidget {
 
     return Container(
       alignment: Alignment.center,
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Color(0xFF26313D), Color(0xFF151A20)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+      decoration: BoxDecoration(
+        color: content.videoCallFallbackBackgroundColor,
+        gradient: content.videoCallFallbackBackgroundColor == null
+            ? const LinearGradient(
+                colors: [Color(0xFF26313D), Color(0xFF151A20)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              )
+            : null,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 28,
-              fontWeight: FontWeight.w700,
+          Container(
+            alignment: Alignment.center,
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              color:
+                  content.videoCallProfileBackgroundColor ??
+                  Colors.white.withValues(alpha: 0.14),
+              shape: BoxShape.circle,
+            ),
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 28,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
           const SizedBox(height: 8),

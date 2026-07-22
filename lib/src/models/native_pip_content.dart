@@ -13,6 +13,11 @@ class NativePipContent {
     this.title,
     this.subtitle,
     this.iosVideoUrl,
+    this.videoCallBackgroundColor,
+    this.videoCallFallbackBackgroundColor,
+    this.videoCallProfileBackgroundColor,
+    this.iosVideoCallPreferredContentSize,
+    this.iosVideoCallLocalPreviewWidthRatio,
     this.participants = const [],
   });
 
@@ -37,10 +42,20 @@ class NativePipContent {
 
   factory NativePipContent.videoCall({
     required List<PipParticipant> participants,
+    Color? backgroundColor,
+    Color? fallbackBackgroundColor,
+    Color? profileBackgroundColor,
+    Size? iosPreferredContentSize,
+    double? iosLocalPreviewWidthRatio,
   }) {
     return NativePipContent._(
       type: NativePipContentType.videoCall,
       participants: List.unmodifiable(participants),
+      videoCallBackgroundColor: backgroundColor,
+      videoCallFallbackBackgroundColor: fallbackBackgroundColor,
+      videoCallProfileBackgroundColor: profileBackgroundColor,
+      iosVideoCallPreferredContentSize: iosPreferredContentSize,
+      iosVideoCallLocalPreviewWidthRatio: iosLocalPreviewWidthRatio,
     );
   }
 
@@ -51,5 +66,10 @@ class NativePipContent {
   final String? title;
   final String? subtitle;
   final String? iosVideoUrl;
+  final Color? videoCallBackgroundColor;
+  final Color? videoCallFallbackBackgroundColor;
+  final Color? videoCallProfileBackgroundColor;
+  final Size? iosVideoCallPreferredContentSize;
+  final double? iosVideoCallLocalPreviewWidthRatio;
   final List<PipParticipant> participants;
 }

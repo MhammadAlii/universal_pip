@@ -5,6 +5,7 @@ class PipParticipant {
     required this.id,
     required this.displayName,
     this.avatarUrl,
+    this.nativeVideoTrackId,
     this.renderer,
     this.videoBuilder,
     this.isLocal = false,
@@ -15,6 +16,12 @@ class PipParticipant {
   final String id;
   final String displayName;
   final String? avatarUrl;
+
+  /// Native WebRTC track identifier used by the iOS video-call PiP bridge.
+  ///
+  /// The [renderer] itself is a Dart object and cannot cross a method channel.
+  /// iOS resolves this identifier to the live native `RTCVideoTrack` instead.
+  final String? nativeVideoTrackId;
 
   /// Platform-specific renderer handle.
   ///
@@ -34,5 +41,6 @@ class PipParticipant {
   final bool isCameraEnabled;
 
   bool get hasVideo =>
-      isCameraEnabled && (renderer != null || videoBuilder != null);
+      isCameraEnabled &&
+      (nativeVideoTrackId != null || renderer != null || videoBuilder != null);
 }

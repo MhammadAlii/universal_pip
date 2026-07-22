@@ -100,11 +100,15 @@ void main() {
     expect(calls.single.method, 'setNativeContent');
     expect(calls.single.arguments, {
       'type': 'videoCall',
+      'backgroundColor': null,
+      'fallbackBackgroundColor': null,
+      'profileBackgroundColor': null,
       'participants': [
         {
           'id': 'remote',
           'displayName': 'Remote User',
           'avatarUrl': null,
+          'nativeVideoTrackId': null,
           'isLocal': false,
           'isMuted': false,
           'isCameraEnabled': true,
@@ -113,6 +117,7 @@ void main() {
           'id': 'local',
           'displayName': 'You',
           'avatarUrl': null,
+          'nativeVideoTrackId': null,
           'isLocal': true,
           'isMuted': true,
           'isCameraEnabled': false,

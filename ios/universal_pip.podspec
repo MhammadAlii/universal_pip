@@ -14,11 +14,12 @@ Android system PiP, and safe iOS/web fallbacks.
   s.license          = { :file => '../LICENSE' }
   s.author           = { 'Your Company' => 'email@example.com' }
   s.source           = { :path => '.' }
-  s.source_files = 'Classes/**/*.swift'
+  s.source_files = 'Classes/**/*.{swift,h,m}'
   s.resource_bundles = {
     'universal_pip_privacy' => ['Resources/PrivacyInfo.xcprivacy']
   }
   s.dependency 'Flutter'
+  s.dependency 'WebRTC-SDK', '144.7559.09'
   s.platform = :ios, '13.0'
 
   # Flutter.framework does not contain a i386 slice.

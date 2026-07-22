@@ -53,5 +53,9 @@ abstract class UniversalPipPlatform extends PlatformInterface {
     throw UnimplementedError('updateSourceRectHint() is not implemented.');
   }
 
+  Object? get systemPipWindow => null;
+
+  void setWebAutoEnterHandler(Future<void> Function()? handler) {}
+
   Stream<bool> get systemPipModeStream => const Stream<bool>.empty();
 }

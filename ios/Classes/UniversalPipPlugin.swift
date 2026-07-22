@@ -11,11 +11,32 @@ public class UniversalPipPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, 
   private var playerHostView: UIView?
   private var callSourceView: UIView?
   private var callViewController: UIViewController?
+  private var callContentView: NativePipVideoCallView?
   private var sourceRectHint: CGRect?
   private var activeContentKey: String?
   private var pendingStartResult: FlutterResult?
   private var pendingStartTimeout: Timer?
   private var lastError: String?
+  private var configuredAspectRatio: CGFloat?
+  private var webRtcDebugObserver: NSObjectProtocol?
+
+  override init() {
+    super.init()
+    webRtcDebugObserver = NotificationCenter.default.addObserver(
+      forName: Notification.Name(UniversalPipWebRTCBridge.debugNotificationName()),
+      object: nil,
+      queue: .main
+    ) { [weak self] notification in
+      guard let message = notification.object as? String else { return }
+      self?.eventSink?(["type": "debug", "message": message])
+    }
+  }
+
+  deinit {
+    if let webRtcDebugObserver {
+      NotificationCenter.default.removeObserver(webRtcDebugObserver)
+    }
+  }
 
   public static func register(with registrar: FlutterPluginRegistrar) {
     let methodChannel = FlutterMethodChannel(
@@ -38,6 +59,8 @@ public class UniversalPipPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, 
     case "getLastSystemPipError":
       result(lastError)
     case "configureSystemPip":
+      let arguments = call.arguments as? [String: Any]
+      configuredAspectRatio = positiveNumber(from: arguments?["aspectRatio"])
       result(nil)
     case "setNativeContent":
       setNativeContent(call.arguments)
@@ -102,7 +125,14 @@ public class UniversalPipPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, 
       preparePlayerContent(url: url)
     case "videoCall":
       let participants = parseParticipants(content["participants"])
-      prepareVideoCallContent(participants: participants)
+      prepareVideoCallContent(
+        participants: participants,
+        backgroundColor: color(from: content["backgroundColor"]),
+        fallbackBackgroundColor: color(from: content["fallbackBackgroundColor"]),
+        profileBackgroundColor: color(from: content["profileBackgroundColor"]),
+        preferredContentSize: size(from: content["iosPreferredContentSize"]),
+        localPreviewWidthRatio: positiveNumber(from: content["iosLocalPreviewWidthRatio"])
+      )
     default:
       setLastError("Unsupported iOS PiP content type: \(type).")
       clearNativeContent(resetError: false)
@@ -147,17 +177,39 @@ public class UniversalPipPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, 
     }
   }
 
-  private func prepareVideoCallContent(participants: [NativePipParticipant]) {
+  private func prepareVideoCallContent(
+    participants: [NativePipParticipant],
+    backgroundColor: UIColor?,
+    fallbackBackgroundColor: UIColor?,
+    profileBackgroundColor: UIColor?,
+    preferredContentSize: CGSize?,
+    localPreviewWidthRatio: CGFloat?
+  ) {
     guard #available(iOS 15.0, *) else {
       setLastError("iOS video-call PiP requires iOS 15.0 or newer.")
       clearNativeContent(resetError: false)
       return
     }
 
-    let contentKey = "videoCall:\(participants.map { $0.cacheKey }.joined(separator: "|"))"
+    do {
+      let audioSession = AVAudioSession.sharedInstance()
+      try audioSession.setCategory(
+        .playAndRecord,
+        mode: .videoChat,
+        options: [.allowBluetooth, .allowBluetoothA2DP]
+      )
+      try audioSession.setActive(true)
+    } catch {
+      setLastError("Could not keep the iOS call audio session active for PiP: \(error.localizedDescription)")
+    }
+    UniversalPipWebRTCBridge.enableMultitaskingCameraAccessIfSupported()
+
+    let contentKey = "videoCall:\(participants.map { $0.structuralKey }.joined(separator: "|")):\(colorKey(backgroundColor)):\(colorKey(fallbackBackgroundColor)):\(colorKey(profileBackgroundColor)):\(sizeKey(preferredContentSize)):\(localPreviewWidthRatio ?? -1):\(configuredAspectRatio ?? -1)"
     if activeContentKey == contentKey,
        pipController != nil,
        player == nil {
+      callViewController?.loadViewIfNeeded()
+      callContentView?.update(participants: participants)
       return
     }
 
@@ -168,9 +220,20 @@ public class UniversalPipPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, 
       return
     }
 
-    let videoCallController = AVPictureInPictureVideoCallViewController()
-    videoCallController.preferredContentSize = CGSize(width: 360, height: 640)
-    configureVideoCallView(videoCallController.view, participants: participants)
+    let videoCallController = NativePipVideoCallViewController { [weak self] view in
+      guard let self = self else { return }
+      self.configureVideoCallView(
+        view,
+        participants: participants,
+        backgroundColor: backgroundColor,
+        fallbackBackgroundColor: fallbackBackgroundColor,
+        profileBackgroundColor: profileBackgroundColor,
+        localPreviewWidthRatio: localPreviewWidthRatio,
+        localPreviewAspectRatio: configuredAspectRatio
+      )
+    }
+    videoCallController.preferredContentSize = preferredContentSize ??
+      contentSize(for: configuredAspectRatio)
 
     let contentSource = AVPictureInPictureController.ContentSource(
       activeVideoCallSourceView: sourceView,
@@ -250,7 +313,7 @@ public class UniversalPipPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, 
     )
   }
 
-  private func number(from value: Any?) -> CGFloat? {
+  private func positiveNumber(from value: Any?) -> CGFloat? {
     if let value = value as? NSNumber {
       return CGFloat(truncating: value)
     }
@@ -302,8 +365,8 @@ public class UniversalPipPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, 
         id: participant["id"] as? String ?? UUID().uuidString,
         displayName: participant["displayName"] as? String ?? "Participant",
         avatarUrl: participant["avatarUrl"] as? String,
+        nativeVideoTrackId: participant["nativeVideoTrackId"] as? String,
         isLocal: participant["isLocal"] as? Bool ?? false,
-        isMuted: participant["isMuted"] as? Bool ?? false,
         isCameraEnabled: participant["isCameraEnabled"] as? Bool ?? true
       )
     }
@@ -311,22 +374,101 @@ public class UniversalPipPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, 
 
   private func configureVideoCallView(
     _ view: UIView,
-    participants: [NativePipParticipant]
+    participants: [NativePipParticipant],
+    backgroundColor: UIColor?,
+    fallbackBackgroundColor: UIColor?,
+    profileBackgroundColor: UIColor?,
+    localPreviewWidthRatio: CGFloat?,
+    localPreviewAspectRatio: CGFloat?
   ) {
+    if let callContentView = callContentView {
+      callContentView.update(participants: participants)
+      return
+    }
+
     view.subviews.forEach { $0.removeFromSuperview() }
-    view.backgroundColor = UIColor(red: 0.06, green: 0.08, blue: 0.10, alpha: 1.0)
+    view.backgroundColor = backgroundColor ?? UIColor(red: 0.06, green: 0.08, blue: 0.10, alpha: 1.0)
 
     let remote = participants.first { !$0.isLocal } ?? participants.first
     let local = participants.first { $0.isLocal }
     let callView = NativePipVideoCallView(
       remote: remote,
       local: local,
+      remoteVideoTrackId: remote?.nativeVideoTrackId,
+      localVideoTrackId: local?.nativeVideoTrackId,
+      backgroundColor: backgroundColor,
+      fallbackBackgroundColor: fallbackBackgroundColor,
+      profileBackgroundColor: profileBackgroundColor,
+      localPreviewWidthRatio: localPreviewWidthRatio,
+      localPreviewAspectRatio: localPreviewAspectRatio,
       fallbackRemoteName: "Call",
       fallbackLocalName: "You"
     )
     callView.frame = view.bounds
     callView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     view.addSubview(callView)
+    callContentView = callView
+  }
+
+  private func color(from value: Any?) -> UIColor? {
+    guard let number = value as? NSNumber else { return nil }
+
+    let argb = number.uint32Value
+    return UIColor(
+      red: CGFloat((argb >> 16) & 0xFF) / 255,
+      green: CGFloat((argb >> 8) & 0xFF) / 255,
+      blue: CGFloat(argb & 0xFF) / 255,
+      alpha: CGFloat((argb >> 24) & 0xFF) / 255
+    )
+  }
+
+  private func colorKey(_ color: UIColor?) -> String {
+    guard let color = color else { return "default" }
+    var red: CGFloat = 0
+    var green: CGFloat = 0
+    var blue: CGFloat = 0
+    var alpha: CGFloat = 0
+    color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+    return "\(red),\(green),\(blue),\(alpha)"
+  }
+
+  private func size(from value: Any?) -> CGSize? {
+    guard let values = value as? [String: Any],
+          let width = values["width"] as? NSNumber,
+          let height = values["height"] as? NSNumber,
+          width.doubleValue > 0,
+          height.doubleValue > 0 else {
+      return nil
+    }
+
+    return CGSize(width: width.doubleValue, height: height.doubleValue)
+  }
+
+  private func sizeKey(_ size: CGSize?) -> String {
+    guard let size = size else { return "default" }
+    return "\(size.width)x\(size.height)"
+  }
+
+  private func contentSize(for aspectRatio: CGFloat?) -> CGSize {
+    let height: CGFloat = 640
+    let ratio: CGFloat
+    if let aspectRatio = aspectRatio,
+       aspectRatio.isFinite,
+       aspectRatio > 0 {
+      ratio = aspectRatio
+    } else {
+      ratio = 9 / 16
+    }
+
+    return CGSize(width: height * ratio, height: height)
+  }
+
+  private func number(from value: Any?) -> CGFloat? {
+    guard let value = value as? NSNumber, value.doubleValue > 0 else {
+      return nil
+    }
+
+    return CGFloat(value.doubleValue)
   }
 
   private func initials(from name: String) -> String {
@@ -592,6 +734,7 @@ public class UniversalPipPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, 
     callSourceView?.removeFromSuperview()
     callSourceView = nil
     callViewController = nil
+    callContentView = nil
     sourceRectHint = nil
     activeContentKey = nil
     if emitInactive {
@@ -656,34 +799,70 @@ private struct NativePipParticipant {
   let id: String
   let displayName: String
   let avatarUrl: String?
+  let nativeVideoTrackId: String?
   let isLocal: Bool
-  let isMuted: Bool
   let isCameraEnabled: Bool
 
-  var cacheKey: String {
+  var structuralKey: String {
     [
       id,
-      displayName,
-      avatarUrl ?? "",
+      nativeVideoTrackId ?? "",
       String(isLocal),
-      String(isMuted),
-      String(isCameraEnabled)
     ].joined(separator: ",")
+  }
+}
+
+@available(iOS 15.0, *)
+private final class NativePipVideoCallViewController:
+  AVPictureInPictureVideoCallViewController {
+  private let configureContent: (UIView) -> Void
+  private var hasConfiguredContent = false
+
+  init(configureContent: @escaping (UIView) -> Void) {
+    self.configureContent = configureContent
+    super.init(nibName: nil, bundle: nil)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override func viewDidLoad() {
+    super.viewDidLoad()
+    guard !hasConfiguredContent else { return }
+
+    hasConfiguredContent = true
+    configureContent(view)
   }
 }
 
 private final class NativePipVideoCallView: UIView {
   private let remoteView: NativePipParticipantTile
   private let localView: NativePipParticipantTile?
+  private let localPreviewWidthRatio: CGFloat?
+  private let localPreviewAspectRatio: CGFloat?
 
   init(
     remote: NativePipParticipant?,
     local: NativePipParticipant?,
+    remoteVideoTrackId: String?,
+    localVideoTrackId: String?,
+    backgroundColor: UIColor?,
+    fallbackBackgroundColor: UIColor?,
+    profileBackgroundColor: UIColor?,
+    localPreviewWidthRatio: CGFloat?,
+    localPreviewAspectRatio: CGFloat?,
     fallbackRemoteName: String,
     fallbackLocalName: String
   ) {
+    self.localPreviewWidthRatio = localPreviewWidthRatio
+    self.localPreviewAspectRatio = localPreviewAspectRatio
     remoteView = NativePipVideoCallView.makeParticipantView(
       participant: remote,
+      videoTrackId: remoteVideoTrackId,
+      fallbackBackgroundColor: fallbackBackgroundColor,
+      profileBackgroundColor: profileBackgroundColor,
       fallbackName: fallbackRemoteName,
       isCompact: false
     )
@@ -691,6 +870,9 @@ private final class NativePipVideoCallView: UIView {
     if let local = local {
       localView = NativePipVideoCallView.makeParticipantView(
         participant: local,
+        videoTrackId: localVideoTrackId,
+        fallbackBackgroundColor: fallbackBackgroundColor,
+        profileBackgroundColor: profileBackgroundColor,
         fallbackName: fallbackLocalName,
         isCompact: true
       )
@@ -700,7 +882,7 @@ private final class NativePipVideoCallView: UIView {
 
     super.init(frame: .zero)
 
-    backgroundColor = UIColor(red: 0.06, green: 0.08, blue: 0.10, alpha: 1.0)
+    self.backgroundColor = backgroundColor ?? UIColor(red: 0.06, green: 0.08, blue: 0.10, alpha: 1.0)
     addSubview(remoteView)
 
     if let localView = localView {
@@ -725,8 +907,10 @@ private final class NativePipVideoCallView: UIView {
 
     let width = max(bounds.width, 1)
     let height = max(bounds.height, 1)
-    let localWidth = min(max(width * 0.18, 44), 60)
-    let localHeight = localWidth * 1.20
+    let localWidthRatio = min(max(localPreviewWidthRatio ?? 0.18, 0.08), 0.5)
+    let localWidth = min(max(width * localWidthRatio, 1), width * 0.5)
+    let localAspectRatio = min(max(localPreviewAspectRatio ?? 9 / 16, 0.1), 10)
+    let localHeight = min(localWidth / localAspectRatio, height * 0.5)
     let inset = min(max(width * 0.035, 6), 10)
     localView.frame = CGRect(
       x: max(width - localWidth - inset, inset),
@@ -737,21 +921,53 @@ private final class NativePipVideoCallView: UIView {
     localView.layer.cornerRadius = min(10, localWidth * 0.16)
   }
 
+  func update(participants: [NativePipParticipant]) {
+    let remote = participants.first { !$0.isLocal } ?? participants.first
+    let local = participants.first { $0.isLocal }
+    remoteView.update(
+      displayName: NativePipVideoCallView.displayName(
+        for: remote,
+        fallbackName: "Call"
+      ),
+      isCameraEnabled: remote?.isCameraEnabled ?? false
+    )
+    localView?.update(
+      displayName: NativePipVideoCallView.displayName(
+        for: local,
+        fallbackName: "You"
+      ),
+      isCameraEnabled: local?.isCameraEnabled ?? false
+    )
+  }
+
   private static func makeParticipantView(
     participant: NativePipParticipant?,
+    videoTrackId: String?,
+    fallbackBackgroundColor: UIColor?,
+    profileBackgroundColor: UIColor?,
     fallbackName: String,
     isCompact: Bool
   ) -> NativePipParticipantTile {
-    let displayName = participant?.displayName ?? fallbackName
+    let displayName = displayName(for: participant, fallbackName: fallbackName)
     return NativePipParticipantTile(
       displayName: displayName,
       initials: initials(from: displayName),
-      isMuted: participant?.isMuted == true,
+      isCameraEnabled: participant?.isCameraEnabled ?? false,
       isCompact: isCompact,
-      backgroundColor: participant?.isCameraEnabled == true
-      ? color(for: participant?.id ?? displayName)
-      : UIColor(red: 0.09, green: 0.11, blue: 0.14, alpha: 1.0)
+      videoTrackId: videoTrackId,
+      backgroundColor: fallbackBackgroundColor ??
+          (participant?.isCameraEnabled == true
+            ? color(for: participant?.id ?? displayName)
+            : UIColor(red: 0.09, green: 0.11, blue: 0.14, alpha: 1.0)),
+      profileBackgroundColor: profileBackgroundColor
     )
+  }
+
+  private static func displayName(
+    for participant: NativePipParticipant?,
+    fallbackName: String
+  ) -> String {
+    participant?.isLocal == true ? "You" : participant?.displayName ?? fallbackName
   }
 
   private static func initials(from name: String) -> String {
@@ -779,44 +995,59 @@ private final class NativePipVideoCallView: UIView {
 }
 
 private final class NativePipParticipantTile: UIView {
+  private let videoView: UIView?
+  private let profileBackgroundColor: UIColor?
   private let initialsLabel = UILabel()
   private let nameLabel = UILabel()
-  private let mutedLabel = UILabel()
   private let isCompact: Bool
+  private var isCameraEnabled: Bool
 
   init(
     displayName: String,
     initials: String,
-    isMuted: Bool,
+    isCameraEnabled: Bool,
     isCompact: Bool,
-    backgroundColor: UIColor
+    videoTrackId: String?,
+    backgroundColor: UIColor,
+    profileBackgroundColor: UIColor?
   ) {
     self.isCompact = isCompact
+    self.isCameraEnabled = isCameraEnabled
+    self.profileBackgroundColor = profileBackgroundColor
+    videoView = UniversalPipWebRTCBridge.videoView(forTrackId: videoTrackId)
     super.init(frame: .zero)
 
     self.backgroundColor = backgroundColor
+
+    if let videoView = videoView {
+      videoView.clipsToBounds = true
+      if isCompact {
+        videoView.transform = CGAffineTransform(scaleX: -1, y: 1)
+      }
+      addSubview(videoView)
+    }
 
     initialsLabel.text = initials
     initialsLabel.textColor = .white
     initialsLabel.textAlignment = .center
     initialsLabel.font = .systemFont(ofSize: isCompact ? 18 : 42, weight: .bold)
-    initialsLabel.backgroundColor = UIColor.white.withAlphaComponent(0.14)
+    initialsLabel.backgroundColor = profileBackgroundColor ?? UIColor.white.withAlphaComponent(0.14)
     initialsLabel.clipsToBounds = true
     addSubview(initialsLabel)
 
     nameLabel.text = displayName
     nameLabel.textColor = UIColor.white.withAlphaComponent(0.92)
-    nameLabel.textAlignment = .center
+    nameLabel.textAlignment = videoView == nil ? .center : .natural
     nameLabel.font = .systemFont(ofSize: isCompact ? 11 : 17, weight: .semibold)
     nameLabel.numberOfLines = isCompact ? 1 : 2
     addSubview(nameLabel)
 
-    mutedLabel.text = isMuted ? "Muted" : nil
-    mutedLabel.textColor = UIColor.white.withAlphaComponent(0.78)
-    mutedLabel.textAlignment = .center
-    mutedLabel.font = .systemFont(ofSize: isCompact ? 9 : 12, weight: .medium)
-    mutedLabel.isHidden = !isMuted
-    addSubview(mutedLabel)
+  }
+
+  deinit {
+    if let videoView = videoView {
+      UniversalPipWebRTCBridge.detachVideoView(videoView)
+    }
   }
 
   @available(*, unavailable)
@@ -829,8 +1060,25 @@ private final class NativePipParticipantTile: UIView {
 
     let width = max(bounds.width, 1)
     let height = max(bounds.height, 1)
-    let avatarSize = min(isCompact ? 44 : 88, width * 0.5, height * 0.42)
-    let avatarY = max((height - avatarSize) / 2 - (isCompact ? 8 : 16), 8)
+    let scale = min(width / 360, height / 640).clamped(to: 0.45...2)
+    let hasVisibleVideo = videoView != nil && isCameraEnabled
+    videoView?.frame = bounds
+    let horizontalInset = min(max(width * 0.05, 4), 20)
+    let nameFontSize = (isCompact ? 11 : 17) * scale
+    let avatarFontSize = (isCompact ? 18 : 42) * scale
+    let nameHeight = max(nameFontSize * (isCompact ? 1.35 : 1.5), 12)
+    let avatarSize = min(
+      width * (isCompact ? 0.48 : 0.40),
+      height * (isCompact ? 0.42 : 0.36)
+    )
+    let fallbackContentHeight = avatarSize + nameHeight + (isCompact ? 8 : 18)
+    let avatarY = max((height - fallbackContentHeight) / 2, horizontalInset)
+
+    initialsLabel.font = .systemFont(ofSize: avatarFontSize, weight: .bold)
+    nameLabel.font = .systemFont(ofSize: nameFontSize, weight: .semibold)
+    nameLabel.textAlignment = hasVisibleVideo ? .natural : .center
+    nameLabel.numberOfLines = !hasVisibleVideo && !isCompact ? 2 : 1
+    initialsLabel.isHidden = hasVisibleVideo
     initialsLabel.frame = CGRect(
       x: (width - avatarSize) / 2,
       y: avatarY,
@@ -839,21 +1087,45 @@ private final class NativePipParticipantTile: UIView {
     )
     initialsLabel.layer.cornerRadius = avatarSize / 2
 
-    let horizontalInset = min(CGFloat(12), width / 4)
     let labelWidth = max(width - horizontalInset * 2, 1)
-    let nameHeight = isCompact ? CGFloat(16) : CGFloat(44)
+    let nameY = !hasVisibleVideo
+        ? initialsLabel.frame.maxY + (isCompact ? 6 : 14)
+        : height - nameHeight - horizontalInset
     nameLabel.frame = CGRect(
       x: horizontalInset,
-      y: initialsLabel.frame.maxY + (isCompact ? 6 : 14),
+      y: nameY,
       width: labelWidth,
       height: nameHeight
     )
 
-    mutedLabel.frame = CGRect(
-      x: horizontalInset,
-      y: nameLabel.frame.maxY + 4,
-      width: labelWidth,
-      height: isCompact ? 12 : 16
-    )
+  }
+
+  func update(
+    displayName: String,
+    isCameraEnabled: Bool
+  ) {
+    nameLabel.text = displayName
+    initialsLabel.text = NativePipParticipantTile.initials(from: displayName)
+    self.isCameraEnabled = isCameraEnabled
+    videoView?.isHidden = !isCameraEnabled
+    setNeedsLayout()
+  }
+
+  private static func initials(from name: String) -> String {
+    let parts = name
+      .split(separator: " ")
+      .map(String.init)
+      .filter { !$0.isEmpty }
+    guard let first = parts.first else { return "?" }
+    guard let last = parts.dropFirst().last else {
+      return String(first.prefix(1)).uppercased()
+    }
+    return "\(first.prefix(1))\(last.prefix(1))".uppercased()
+  }
+}
+
+private extension CGFloat {
+  func clamped(to range: ClosedRange<CGFloat>) -> CGFloat {
+    Swift.min(Swift.max(self, range.lowerBound), range.upperBound)
   }
 }

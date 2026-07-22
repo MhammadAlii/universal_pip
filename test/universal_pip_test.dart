@@ -56,6 +56,12 @@ class MockUniversalPipPlatform
   Stream<bool> get systemPipModeStream => pipModeController.stream;
 
   @override
+  Object? get systemPipWindow => null;
+
+  @override
+  void setWebAutoEnterHandler(Future<void> Function()? handler) {}
+
+  @override
   Future<void> updateSourceRectHint(Rect? rect) async {
     lastSourceRectHint = rect;
   }

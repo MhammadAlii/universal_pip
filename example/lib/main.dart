@@ -58,12 +58,13 @@ class _ExampleAppState extends State<ExampleApp> {
           config: const UniversalPipConfig(
             aspectRatio: 9 / 16,
             enableSystemPip: true,
+            enableWebDocumentPip: true,
             initialBounds: Rect.fromLTWH(220, 520, 144, 256),
           ),
           inAppBuilder: (context, state) =>
               _PipBubble(content: state.content ?? _callContent),
-          nativeContentBuilder: (context, state) =>
-              state.content ?? _callContent,
+          webInAppBuilder: (context, state) =>
+              _PipBubble(content: state.content ?? _callContent),
           nativeSurfaceBuilder: (context, state, content) =>
               _PipSurface(content: content),
           child: child ?? const SizedBox.shrink(),

@@ -2,10 +2,16 @@ PODS:
   - Flutter (1.0.0)
   - universal_pip (0.0.1):
     - Flutter
+    - WebRTC-SDK (= 144.7559.09)
+  - WebRTC-SDK (144.7559.09)
 
 DEPENDENCIES:
   - Flutter (from `Flutter`)
   - universal_pip (from `.symlinks/plugins/universal_pip/ios`)
+
+SPEC REPOS:
+  trunk:
+    - WebRTC-SDK
 
 EXTERNAL SOURCES:
   Flutter:
@@ -15,7 +21,8 @@ EXTERNAL SOURCES:
 
 SPEC CHECKSUMS:
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
-  universal_pip: 991659560368c508cfb1f1805d51a56ec4b883b0
+  universal_pip: fed02ce1ce335060782779a694920998d67ad647
+  WebRTC-SDK: e6006119cd730d6315d875e4a421b6cc8bb88833
 
 PODFILE CHECKSUM: 3c63482e143d1b91d2d2560aee9fb04ecc74ac7e
 

@@ -109,7 +109,17 @@ class MethodChannelUniversalPip extends UniversalPipPlatform {
   @override
   Stream<bool> get systemPipModeStream => eventChannel
       .receiveBroadcastStream()
-      .map((event) => event == true)
+      .map((event) {
+        if (event is Map && event['type'] == 'debug') {
+          final message = event['message'];
+          if (message is String) {
+            debugPrint('[UniversalPip][iOS][WebRTC] $message');
+          }
+        }
+        return event;
+      })
+      .where((event) => event is bool)
+      .cast<bool>()
       .handleError((_) {}, test: (error) => error is MissingPluginException);
 
   Map<String, Object?>? _serializeNativeContent(NativePipContent? content) {
@@ -125,12 +135,22 @@ class MethodChannelUniversalPip extends UniversalPipPlatform {
       },
       NativePipContentType.videoCall => <String, Object?>{
         'type': 'videoCall',
+        'backgroundColor': content.videoCallBackgroundColor?.toARGB32(),
+        'fallbackBackgroundColor': content.videoCallFallbackBackgroundColor
+            ?.toARGB32(),
+        'profileBackgroundColor': content.videoCallProfileBackgroundColor
+            ?.toARGB32(),
+        'iosPreferredContentSize': _serializeSize(
+          content.iosVideoCallPreferredContentSize,
+        ),
+        'iosLocalPreviewWidthRatio': content.iosVideoCallLocalPreviewWidthRatio,
         'participants': content.participants
             .map(
               (participant) => <String, Object?>{
                 'id': participant.id,
                 'displayName': participant.displayName,
                 'avatarUrl': participant.avatarUrl,
+                'nativeVideoTrackId': participant.nativeVideoTrackId,
                 'isLocal': participant.isLocal,
                 'isMuted': participant.isMuted,
                 'isCameraEnabled': participant.isCameraEnabled,
@@ -139,5 +159,11 @@ class MethodChannelUniversalPip extends UniversalPipPlatform {
             .toList(),
       },
     };
+  }
+
+  Map<String, double>? _serializeSize(Size? size) {
+    if (size == null || !size.isFinite || size.isEmpty) return null;
+
+    return {'width': size.width, 'height': size.height};
   }
 }

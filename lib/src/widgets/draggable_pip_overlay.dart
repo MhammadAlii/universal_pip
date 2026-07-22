@@ -28,6 +28,17 @@ class _DraggablePipOverlayState extends State<DraggablePipOverlay> {
   Rect? _lastReportedRect;
 
   @override
+  void didUpdateWidget(covariant DraggablePipOverlay oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (_didConfiguredSizeChange(oldWidget.config, widget.config)) {
+      _offset = null;
+      _dragStartOffset = null;
+      _lastReportedRect = null;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Positioned.fill(
       child: LayoutBuilder(
@@ -35,10 +46,7 @@ class _DraggablePipOverlayState extends State<DraggablePipOverlay> {
           _viewportSize = Size(constraints.maxWidth, constraints.maxHeight);
 
           final pipSize = _resolveSize();
-          final offset = _clampOffset(
-            _offset ?? widget.bounds?.topLeft ?? _getInitialOffset(pipSize),
-            pipSize,
-          );
+          final offset = _clampOffset(_resolveOffset(pipSize), pipSize);
           _notifyRectChanged(context, offset, pipSize);
 
           return Stack(
@@ -92,7 +100,7 @@ class _DraggablePipOverlayState extends State<DraggablePipOverlay> {
   }
 
   Size _resolveSize() {
-    final configured = widget.bounds?.size ?? widget.config.initialSize;
+    final configured = widget.config.initialSize;
     final maxSize = widget.config.maxSize;
     final width = configured.width.clamp(
       widget.config.minSize.width,
@@ -105,15 +113,41 @@ class _DraggablePipOverlayState extends State<DraggablePipOverlay> {
     return Size(width.toDouble(), height.toDouble());
   }
 
+  Offset _resolveOffset(Size pipSize) {
+    if (_offset != null) return _offset!;
+
+    final bounds = widget.bounds;
+    if (bounds != null && _isSameSize(bounds.size, pipSize)) {
+      return bounds.topLeft;
+    }
+
+    return _getInitialOffset(pipSize);
+  }
+
+  bool _didConfiguredSizeChange(
+    UniversalPipConfig oldConfig,
+    UniversalPipConfig newConfig,
+  ) {
+    return oldConfig.initialSize != newConfig.initialSize ||
+        oldConfig.minSize != newConfig.minSize ||
+        oldConfig.maxSize != newConfig.maxSize;
+  }
+
+  bool _isSameSize(Size a, Size b) {
+    const tolerance = 0.5;
+    return (a.width - b.width).abs() <= tolerance &&
+        (a.height - b.height).abs() <= tolerance;
+  }
+
   Offset _getInitialOffset(Size pipSize) {
-    final mediaQuery = MediaQuery.maybeOf(context);
-    final padding = mediaQuery?.viewPadding ?? EdgeInsets.zero;
+    final padding = _effectiveSystemPadding();
     final direction = Directionality.maybeOf(context) ?? TextDirection.ltr;
     final maxX =
-        (_viewportSize.width - pipSize.width - widget.config.edgePadding).clamp(
-          widget.config.edgePadding,
-          double.infinity,
-        );
+        (_viewportSize.width -
+                pipSize.width -
+                padding.right -
+                widget.config.edgePadding)
+            .clamp(padding.left + widget.config.edgePadding, double.infinity);
     final y =
         _viewportSize.height -
         pipSize.height -
@@ -121,20 +155,23 @@ class _DraggablePipOverlayState extends State<DraggablePipOverlay> {
         widget.config.edgePadding;
 
     return Offset(
-      direction == TextDirection.rtl ? widget.config.edgePadding : maxX,
+      direction == TextDirection.rtl
+          ? padding.left + widget.config.edgePadding
+          : maxX,
       y,
     );
   }
 
   Offset _clampOffset(Offset offset, Size pipSize) {
-    final mediaQuery = MediaQuery.maybeOf(context);
-    final padding = mediaQuery?.viewPadding ?? EdgeInsets.zero;
+    final padding = _effectiveSystemPadding();
+    final minX = padding.left + widget.config.edgePadding;
     final minY = padding.top + widget.config.edgePadding;
     final maxX =
-        (_viewportSize.width - pipSize.width - widget.config.edgePadding).clamp(
-          widget.config.edgePadding,
-          double.infinity,
-        );
+        (_viewportSize.width -
+                pipSize.width -
+                padding.right -
+                widget.config.edgePadding)
+            .clamp(minX, double.infinity);
     final maxY =
         _viewportSize.height -
         pipSize.height -
@@ -142,22 +179,44 @@ class _DraggablePipOverlayState extends State<DraggablePipOverlay> {
         widget.config.edgePadding;
 
     return Offset(
-      offset.dx.clamp(widget.config.edgePadding, maxX).toDouble(),
+      offset.dx.clamp(minX, maxX).toDouble(),
       offset.dy.clamp(minY, maxY.clamp(minY, double.infinity)).toDouble(),
     );
   }
 
   Offset _snapToEdge(Offset offset, Size pipSize) {
     final clamped = _clampOffset(offset, pipSize);
+    final padding = _effectiveSystemPadding();
+    final minX = padding.left + widget.config.edgePadding;
     final maxX =
-        (_viewportSize.width - pipSize.width - widget.config.edgePadding).clamp(
-          widget.config.edgePadding,
-          double.infinity,
-        );
-    final targetX = clamped.dx < _viewportSize.width / 2
-        ? widget.config.edgePadding
-        : maxX;
+        (_viewportSize.width -
+                pipSize.width -
+                padding.right -
+                widget.config.edgePadding)
+            .clamp(minX, double.infinity);
+    final targetX = clamped.dx < _viewportSize.width / 2 ? minX : maxX;
     return Offset(targetX.toDouble(), clamped.dy);
+  }
+
+  EdgeInsets _effectiveSystemPadding() {
+    final mediaQuery = MediaQuery.maybeOf(context);
+    if (mediaQuery == null) return EdgeInsets.zero;
+
+    final viewPadding = mediaQuery.viewPadding;
+    final padding = mediaQuery.padding;
+    final gestureInsets = mediaQuery.systemGestureInsets;
+
+    return EdgeInsets.fromLTRB(
+      _max3(viewPadding.left, padding.left, gestureInsets.left),
+      _max3(viewPadding.top, padding.top, gestureInsets.top),
+      _max3(viewPadding.right, padding.right, gestureInsets.right),
+      _max3(viewPadding.bottom, padding.bottom, gestureInsets.bottom),
+    );
+  }
+
+  double _max3(double a, double b, double c) {
+    final maxAB = a > b ? a : b;
+    return maxAB > c ? maxAB : c;
   }
 
   void _notifyRectChanged(BuildContext context, Offset offset, Size pipSize) {
