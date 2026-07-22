@@ -202,9 +202,10 @@ public class UniversalPipPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, 
     } catch {
       setLastError("Could not keep the iOS call audio session active for PiP: \(error.localizedDescription)")
     }
-    UniversalPipWebRTCBridge.enableMultitaskingCameraAccessIfSupported()
+    let isLocalCameraLiveInPipSupported =
+      UniversalPipWebRTCBridge.enableMultitaskingCameraAccessIfSupported()
 
-    let contentKey = "videoCall:\(participants.map { $0.structuralKey }.joined(separator: "|")):\(colorKey(backgroundColor)):\(colorKey(fallbackBackgroundColor)):\(colorKey(profileBackgroundColor)):\(sizeKey(preferredContentSize)):\(localPreviewWidthRatio ?? -1):\(configuredAspectRatio ?? -1)"
+    let contentKey = "videoCall:\(participants.map { $0.structuralKey }.joined(separator: "|")):\(colorKey(backgroundColor)):\(colorKey(fallbackBackgroundColor)):\(colorKey(profileBackgroundColor)):\(sizeKey(preferredContentSize)):\(localPreviewWidthRatio ?? -1):\(configuredAspectRatio ?? -1):\(isLocalCameraLiveInPipSupported)"
     if activeContentKey == contentKey,
        pipController != nil,
        player == nil {
@@ -229,7 +230,8 @@ public class UniversalPipPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, 
         fallbackBackgroundColor: fallbackBackgroundColor,
         profileBackgroundColor: profileBackgroundColor,
         localPreviewWidthRatio: localPreviewWidthRatio,
-        localPreviewAspectRatio: configuredAspectRatio
+        localPreviewAspectRatio: configuredAspectRatio,
+        isLocalCameraLiveInPipSupported: isLocalCameraLiveInPipSupported
       )
     }
     videoCallController.preferredContentSize = preferredContentSize ??
@@ -379,7 +381,8 @@ public class UniversalPipPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, 
     fallbackBackgroundColor: UIColor?,
     profileBackgroundColor: UIColor?,
     localPreviewWidthRatio: CGFloat?,
-    localPreviewAspectRatio: CGFloat?
+    localPreviewAspectRatio: CGFloat?,
+    isLocalCameraLiveInPipSupported: Bool
   ) {
     if let callContentView = callContentView {
       callContentView.update(participants: participants)
@@ -401,6 +404,7 @@ public class UniversalPipPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, 
       profileBackgroundColor: profileBackgroundColor,
       localPreviewWidthRatio: localPreviewWidthRatio,
       localPreviewAspectRatio: localPreviewAspectRatio,
+      isLocalCameraLiveInPipSupported: isLocalCameraLiveInPipSupported,
       fallbackRemoteName: "Call",
       fallbackLocalName: "You"
     )
@@ -853,6 +857,7 @@ private final class NativePipVideoCallView: UIView {
     profileBackgroundColor: UIColor?,
     localPreviewWidthRatio: CGFloat?,
     localPreviewAspectRatio: CGFloat?,
+    isLocalCameraLiveInPipSupported: Bool,
     fallbackRemoteName: String,
     fallbackLocalName: String
   ) {
@@ -874,7 +879,8 @@ private final class NativePipVideoCallView: UIView {
         fallbackBackgroundColor: fallbackBackgroundColor,
         profileBackgroundColor: profileBackgroundColor,
         fallbackName: fallbackLocalName,
-        isCompact: true
+        isCompact: true,
+        isPaused: !isLocalCameraLiveInPipSupported
       )
     } else {
       localView = nil
@@ -946,7 +952,8 @@ private final class NativePipVideoCallView: UIView {
     fallbackBackgroundColor: UIColor?,
     profileBackgroundColor: UIColor?,
     fallbackName: String,
-    isCompact: Bool
+    isCompact: Bool,
+    isPaused: Bool = false
   ) -> NativePipParticipantTile {
     let displayName = displayName(for: participant, fallbackName: fallbackName)
     return NativePipParticipantTile(
@@ -955,6 +962,7 @@ private final class NativePipVideoCallView: UIView {
       isCameraEnabled: participant?.isCameraEnabled ?? false,
       isCompact: isCompact,
       videoTrackId: videoTrackId,
+      isPaused: isPaused,
       backgroundColor: fallbackBackgroundColor ??
           (participant?.isCameraEnabled == true
             ? color(for: participant?.id ?? displayName)
@@ -999,8 +1007,13 @@ private final class NativePipParticipantTile: UIView {
   private let profileBackgroundColor: UIColor?
   private let initialsLabel = UILabel()
   private let nameLabel = UILabel()
+  private let pausedOverlayView = UIVisualEffectView(
+    effect: UIBlurEffect(style: .dark)
+  )
+  private let pausedLabel = UILabel()
   private let isCompact: Bool
   private var isCameraEnabled: Bool
+  private var isPaused: Bool
 
   init(
     displayName: String,
@@ -1008,11 +1021,13 @@ private final class NativePipParticipantTile: UIView {
     isCameraEnabled: Bool,
     isCompact: Bool,
     videoTrackId: String?,
+    isPaused: Bool,
     backgroundColor: UIColor,
     profileBackgroundColor: UIColor?
   ) {
     self.isCompact = isCompact
     self.isCameraEnabled = isCameraEnabled
+    self.isPaused = isPaused
     self.profileBackgroundColor = profileBackgroundColor
     videoView = UniversalPipWebRTCBridge.videoView(forTrackId: videoTrackId)
     super.init(frame: .zero)
@@ -1042,6 +1057,14 @@ private final class NativePipParticipantTile: UIView {
     nameLabel.numberOfLines = isCompact ? 1 : 2
     addSubview(nameLabel)
 
+    pausedOverlayView.clipsToBounds = true
+    pausedOverlayView.isHidden = !isPaused
+    pausedLabel.text = "Paused"
+    pausedLabel.textColor = .white
+    pausedLabel.textAlignment = .center
+    pausedLabel.font = .systemFont(ofSize: isCompact ? 12 : 18, weight: .semibold)
+    pausedOverlayView.contentView.addSubview(pausedLabel)
+    addSubview(pausedOverlayView)
   }
 
   deinit {
@@ -1062,6 +1085,7 @@ private final class NativePipParticipantTile: UIView {
     let height = max(bounds.height, 1)
     let scale = min(width / 360, height / 640).clamped(to: 0.45...2)
     let hasVisibleVideo = videoView != nil && isCameraEnabled
+    let shouldShowPausedOverlay = hasVisibleVideo && isPaused
     videoView?.frame = bounds
     let horizontalInset = min(max(width * 0.05, 4), 20)
     let nameFontSize = (isCompact ? 11 : 17) * scale
@@ -1098,6 +1122,17 @@ private final class NativePipParticipantTile: UIView {
       height: nameHeight
     )
 
+    pausedOverlayView.isHidden = !shouldShowPausedOverlay
+    if shouldShowPausedOverlay {
+      pausedOverlayView.frame = bounds
+      pausedOverlayView.layer.cornerRadius = layer.cornerRadius
+      pausedLabel.font = .systemFont(
+        ofSize: (isCompact ? 12 : 18) * scale,
+        weight: .semibold
+      )
+      pausedLabel.frame = pausedOverlayView.contentView.bounds
+      pausedLabel.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    }
   }
 
   func update(

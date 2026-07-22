@@ -6,7 +6,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 + (NSString *)debugNotificationName;
 
-+ (void)enableMultitaskingCameraAccessIfSupported;
++ (BOOL)enableMultitaskingCameraAccessIfSupported;
 + (nullable UIView *)videoViewForTrackId:(nullable NSString *)trackId;
 + (void)detachVideoView:(UIView *)videoView;
 

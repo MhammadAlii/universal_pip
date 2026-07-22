@@ -216,29 +216,33 @@ static void UniversalPipWebRTCDebug(NSString *message) {
   return UniversalPipWebRTCDebugNotification;
 }
 
-+ (void)enableMultitaskingCameraAccessIfSupported {
++ (BOOL)enableMultitaskingCameraAccessIfSupported {
   if (@available(iOS 16.0, *)) {
     Class pluginClass = NSClassFromString(@"FlutterWebRTCPlugin");
     SEL sharedSelector = NSSelectorFromString(@"sharedSingleton");
     if (pluginClass == Nil || ![pluginClass respondsToSelector:sharedSelector]) {
       UniversalPipWebRTCDebug(@"cannot enable multitasking camera access: FlutterWebRTCPlugin is unavailable");
-      return;
+      return NO;
     }
 
     id plugin = ((id (*)(id, SEL))objc_msgSend)(pluginClass, sharedSelector);
     AVCaptureSession *captureSession = [plugin valueForKeyPath:@"videoCapturer.captureSession"];
     if (captureSession == nil) {
       UniversalPipWebRTCDebug(@"cannot enable multitasking camera access: no active capture session");
-      return;
+      return NO;
     }
     if (!captureSession.isMultitaskingCameraAccessSupported) {
       UniversalPipWebRTCDebug(@"multitasking camera access is not supported on this device");
-      return;
+      return NO;
     }
 
     captureSession.multitaskingCameraAccessEnabled = YES;
     UniversalPipWebRTCDebug(@"enabled multitasking camera access");
+    return YES;
   }
+
+  UniversalPipWebRTCDebug(@"multitasking camera access requires iOS 16 or newer");
+  return NO;
 }
 
 + (UIView *)videoViewForTrackId:(NSString *)trackId {
