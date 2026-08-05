@@ -100,10 +100,6 @@ class _UniversalPipState extends State<UniversalPip>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    debugPrint(
-      '[UniversalPip] lifecycle=$state mode=${widget.controller.state.mode.name} '
-      'system=${widget.controller.state.isSystemPipActive}',
-    );
     // Chrome invokes the registered Media Session action when Auto PiP is
     // available; ordinary browser lifecycle events cannot create the window.
     if (kIsWeb) return;
@@ -140,20 +136,18 @@ class _UniversalPipState extends State<UniversalPip>
 
   Future<void> _enterSystemPipFromLifecycle() async {
     if (_isAutoEnteringSystemPip) {
-      debugPrint('[UniversalPip] auto entry already in progress');
       return;
     }
 
     _isAutoEnteringSystemPip = true;
     try {
-      final entered = await widget.controller.enterSystemPip(
+      await widget.controller.enterSystemPip(
         aspectRatio: widget.config.aspectRatio,
         preRenderSystemSurface:
             widget.config.preRenderSystemSurfaceBeforeSystemPip,
         androidSeamlessResize: widget.config.androidSeamlessResize,
         androidAutoEnterOnUserLeave: widget.config.androidAutoEnterOnUserLeave,
       );
-      debugPrint('[UniversalPip] auto entry completed entered=$entered');
     } finally {
       _isAutoEnteringSystemPip = false;
     }
@@ -177,11 +171,10 @@ class _UniversalPipState extends State<UniversalPip>
       return;
     }
 
-    final entered = await widget.controller.enterSystemPip(
+    await widget.controller.enterSystemPip(
       aspectRatio: widget.config.aspectRatio,
       preRenderSystemSurface: false,
     );
-    debugPrint('[UniversalPip] browser auto entry completed entered=$entered');
   }
 
   Future<void> _exitSystemPipAndRestore() async {
@@ -374,9 +367,7 @@ class _UniversalPipState extends State<UniversalPip>
     _lastWebDocumentPipWindow = pipWindow;
     try {
       widget.webDocumentPipDomBuilder!(pipWindow, widget.controller.state);
-    } catch (error) {
-      debugPrint('[UniversalPip] failed to build Document PiP content: $error');
-    }
+    } catch (_) {}
   }
 
   Future<void> _prepareSystemPip() async {

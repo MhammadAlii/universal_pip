@@ -12,10 +12,15 @@ class UniversalPipController extends ChangeNotifier {
   UniversalPipController({UniversalPipPlatform? platform})
     : _platform = platform ?? UniversalPipPlatform.instance {
     _pipModeSub = _platform.systemPipModeStream.listen(_handleSystemPipMode);
+    _diagnosticsTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => _logDiagnostics(),
+    );
   }
 
   final UniversalPipPlatform _platform;
   StreamSubscription<bool>? _pipModeSub;
+  Timer? _diagnosticsTimer;
   UniversalPipState _state = const UniversalPipState.hidden();
   UniversalPipMode _restoreModeAfterSystemPip = UniversalPipMode.inApp;
   bool _isEnteringSystemPip = false;
@@ -33,9 +38,6 @@ class UniversalPipController extends ChangeNotifier {
   }
 
   void showForeground({NativePipContent? content, Rect? sourceRectHint}) {
-    _log(
-      'show foreground content=${content?.type.name} bounds=$sourceRectHint',
-    );
     if (_isSystemPipOwned) {
       _setSystemRestoreTarget(
         mode: UniversalPipMode.foreground,
@@ -53,7 +55,6 @@ class UniversalPipController extends ChangeNotifier {
   }
 
   void show({NativePipContent? content, Rect? initialBounds}) {
-    _log('show in-app content=${content?.type.name} bounds=$initialBounds');
     if (_isSystemPipOwned) {
       _setSystemRestoreTarget(
         mode: UniversalPipMode.inApp,
@@ -75,7 +76,6 @@ class UniversalPipController extends ChangeNotifier {
   }
 
   void setNativeContent(NativePipContent content) {
-    _log('set native content=${content.type.name}');
     if (_state.mode == UniversalPipMode.hidden) {
       _setState(
         UniversalPipState(
@@ -93,7 +93,6 @@ class UniversalPipController extends ChangeNotifier {
   }
 
   void setBounds(Rect bounds) {
-    _log('set source bounds=$bounds');
     _setState(_state.copyWith(bounds: bounds));
     unawaited(_platform.updateSourceRectHint(bounds));
   }
@@ -105,21 +104,11 @@ class UniversalPipController extends ChangeNotifier {
     bool androidAutoEnterOnUserLeave = true,
   }) async {
     if (_state.mode == UniversalPipMode.hidden) {
-      _log('skip system entry because PiP is hidden');
       return false;
     }
     if (_state.isSystemPipActive || _isEnteringSystemPip) {
-      _log(
-        'skip system entry because PiP is already '
-        '${_state.isSystemPipActive ? 'active' : 'transitioning'}',
-      );
       return _state.isSystemPipActive;
     }
-
-    _log(
-      'enter system requested mode=${_state.mode.name} '
-      'preRender=$preRenderSystemSurface',
-    );
 
     _isEnteringSystemPip = true;
 
@@ -140,7 +129,6 @@ class UniversalPipController extends ChangeNotifier {
 
       final isSupported = await _platform.isSystemPipSupported();
       if (!isSupported) {
-        _log('system PiP is unsupported');
         return false;
       }
 
@@ -163,7 +151,6 @@ class UniversalPipController extends ChangeNotifier {
       }
 
       final entered = await _platform.enterSystemPip();
-      _log('platform system entry result=$entered');
       if (entered) {
         _setState(
           _state.copyWith(
@@ -194,8 +181,6 @@ class UniversalPipController extends ChangeNotifier {
   }) async {
     if (_state.mode == UniversalPipMode.hidden) return;
 
-    _log('prepare system PiP mode=${_state.mode.name}');
-
     await _platform.configureSystemPip(
       enabled: true,
       aspectRatio: aspectRatio,
@@ -208,7 +193,6 @@ class UniversalPipController extends ChangeNotifier {
 
   void restoreInAppPip() {
     if (_state.mode == UniversalPipMode.hidden) return;
-    _log('restore mode=${_restoreModeAfterSystemPip.name}');
     _setState(
       _state.copyWith(
         mode: _restoreModeAfterSystemPip,
@@ -220,7 +204,6 @@ class UniversalPipController extends ChangeNotifier {
 
   void restoreForeground() {
     if (_state.mode == UniversalPipMode.hidden) return;
-    _log('restore foreground');
     _setState(
       _state.copyWith(
         mode: UniversalPipMode.foreground,
@@ -232,7 +215,6 @@ class UniversalPipController extends ChangeNotifier {
 
   void restoreAfterSystemPipExit() {
     if (_state.mode == UniversalPipMode.hidden) return;
-    _log('restore after system mode=${_restoreModeAfterSystemPip.name}');
     _setState(
       _state.copyWith(
         mode: _restoreModeAfterSystemPip,
@@ -243,12 +225,10 @@ class UniversalPipController extends ChangeNotifier {
   }
 
   Future<void> exitSystemPip() async {
-    _log('exit system requested');
     await _platform.exitSystemPip();
   }
 
   Future<void> hide() async {
-    _log('hide requested');
     final wasSystemPipActive = _state.isSystemPipActive;
     _setState(const UniversalPipState.hidden());
     _restoreModeAfterSystemPip = UniversalPipMode.inApp;
@@ -261,12 +241,12 @@ class UniversalPipController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _diagnosticsTimer?.cancel();
     _pipModeSub?.cancel();
     super.dispose();
   }
 
   void _handleSystemPipMode(bool isActive) {
-    _log('platform PiP event active=$isActive entering=$_isEnteringSystemPip');
     if (isActive) {
       _setState(
         _state.copyWith(
@@ -293,10 +273,6 @@ class UniversalPipController extends ChangeNotifier {
   }
 
   void _setState(UniversalPipState state) {
-    _log(
-      'state ${_state.mode.name}->${state.mode.name} '
-      'system=${state.isSystemPipActive} transitioning=${state.isTransitioning}',
-    );
     _state = state;
     notifyListeners();
   }
@@ -318,14 +294,12 @@ class UniversalPipController extends ChangeNotifier {
   }
 
   void _setSystemTransitionState() {
-    _log('start system transition');
     _setState(
       _state.copyWith(mode: UniversalPipMode.system, isTransitioning: true),
     );
   }
 
   Future<void> _waitForSystemSurfaceFrame() async {
-    _log('wait for system surface frame');
     try {
       final binding = SchedulerBinding.instance;
       binding.scheduleFrame();
@@ -335,8 +309,15 @@ class UniversalPipController extends ChangeNotifier {
     }
   }
 
-  void _log(String message) {
-    debugPrint('[UniversalPip] $message');
+  void _logDiagnostics() {
+    final bounds = _state.bounds;
+    debugPrint(
+      '[UniversalPip] mode=${_state.mode.name} '
+      'visible=${_state.isVisible} system=${_state.isSystemPipActive} '
+      'transitioning=${_state.isTransitioning || _isEnteringSystemPip} '
+      'restore=${_restoreModeAfterSystemPip.name} '
+      'content=${_state.content?.type.name ?? 'none'} bounds=$bounds',
+    );
   }
 
   bool get _isSystemPipOwned =>
@@ -349,7 +330,6 @@ class UniversalPipController extends ChangeNotifier {
     NativePipContent? content,
     Rect? bounds,
   }) {
-    _log('set system restore target=${mode.name}');
     _restoreModeAfterSystemPip = mode;
     _setState(
       _state.copyWith(

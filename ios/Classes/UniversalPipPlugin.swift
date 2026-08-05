@@ -746,7 +746,6 @@ public class UniversalPipPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, 
 
   private func setLastError(_ message: String) {
     lastError = message
-    NSLog("[universal_pip] \(message)")
   }
 
   private func finishPendingStart(_ didStart: Bool) {

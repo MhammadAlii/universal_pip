@@ -8,7 +8,6 @@
 static NSString *const UniversalPipWebRTCDebugNotification = @"UniversalPipWebRTCDebugNotification";
 
 static void UniversalPipWebRTCDebug(NSString *message) {
-  NSLog(@"[UniversalPip][WebRTC] %@", message);
   [[NSNotificationCenter defaultCenter]
     postNotificationName:UniversalPipWebRTCDebugNotification
     object:message];

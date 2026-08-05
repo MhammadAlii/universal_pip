@@ -109,15 +109,6 @@ class MethodChannelUniversalPip extends UniversalPipPlatform {
   @override
   Stream<bool> get systemPipModeStream => eventChannel
       .receiveBroadcastStream()
-      .map((event) {
-        if (event is Map && event['type'] == 'debug') {
-          final message = event['message'];
-          if (message is String) {
-            debugPrint('[UniversalPip][iOS][WebRTC] $message');
-          }
-        }
-        return event;
-      })
       .where((event) => event is bool)
       .cast<bool>()
       .handleError((_) {}, test: (error) => error is MissingPluginException);
