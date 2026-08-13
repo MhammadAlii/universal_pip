@@ -2,7 +2,6 @@ package com.mo_dev.universal_pip
 
 import android.app.Activity
 import android.app.PictureInPictureParams
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Rect
 import android.os.Build
@@ -101,6 +100,23 @@ class UniversalPipPlugin :
 
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
         eventSink?.success(isInPictureInPictureMode)
+        if (!isInPictureInPictureMode && !pipEnabled) {
+            // updatePipParams() can silently no-op while the activity is
+            // still in PiP (some devices reject setPictureInPictureParams()
+            // until it's fully resumed). Now that we're confirmed back in
+            // normal windowed mode, re-apply it so a stale auto-enter flag
+            // can't make a later background/relaunch cycle (e.g. exitPip's
+            // self-relaunch) snap straight back into system PiP.
+            updatePipParams()
+        }
+    }
+
+    // Fires while the activity is still resumed and visible, right as the
+    // user navigates away — the reliable moment to call
+    // enterPictureInPictureMode(). enterPip() already no-ops safely if PiP
+    // isn't currently enabled or we're already in it.
+    override fun onUserLeaveHint() {
+        enterPip()
     }
 
     private fun detachActivity() {
@@ -130,6 +146,9 @@ class UniversalPipPlugin :
         }
     }
 
+    // Android exposes no direct leave-PiP API. UniversalPipActivity restores
+    // the existing task from PiP and then backgrounds it, preserving the
+    // Flutter activity/engine instead of finishing the application.
     private fun exitPip(): Boolean {
         val currentActivity = activity ?: return false
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
@@ -139,18 +158,17 @@ class UniversalPipPlugin :
             return false
         }
 
-        return try {
-            val intent = Intent(currentActivity, currentActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-                addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
-            }
-            currentActivity.startActivity(intent)
-            lastError = null
-            emitPipMode()
-            true
-        } catch (_: Exception) {
-            fail("Android could not restore the activity from Picture-in-Picture.")
+        val pipActivity = currentActivity as? UniversalPipActivity
+            ?: return fail(
+                "The Android activity must extend UniversalPipActivity to exit PiP safely.",
+            )
+        val exitRequested = pipActivity.hidePictureInPictureAndKeepTask()
+        if (!exitRequested) {
+            return fail("Android could not hide Picture-in-Picture safely.")
         }
+
+        lastError = null
+        return true
     }
 
     private fun fail(message: String): Boolean {

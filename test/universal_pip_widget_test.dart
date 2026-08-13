@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:universal_pip/universal_pip.dart';
+import 'package:universal_pip/src/widgets/native_pip_content_surface.dart';
 
 void main() {
   testWidgets('non-web in-app PiP uses the platform-neutral builder', (
@@ -27,5 +28,28 @@ void main() {
     expect(find.text('web in-app'), findsNothing);
 
     controller.dispose();
+  });
+
+  testWidgets('video-call avatar uses configured fallback text', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NativePipContentSurface(
+          content: NativePipContent.videoCall(
+            participants: const [
+              PipParticipant(
+                id: 'remote',
+                displayName: 'Remote User',
+                avatarFallbackText: 'Guest',
+                isCameraEnabled: false,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Guest'), findsOneWidget);
   });
 }

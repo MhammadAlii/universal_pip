@@ -5,6 +5,8 @@ class PipParticipant {
     required this.id,
     required this.displayName,
     this.avatarUrl,
+    this.avatarFallbackUrl,
+    this.avatarFallbackText,
     this.nativeVideoTrackId,
     this.renderer,
     this.videoBuilder,
@@ -16,6 +18,14 @@ class PipParticipant {
   final String id;
   final String displayName;
   final String? avatarUrl;
+
+  /// Image shown if [avatarUrl] is absent or cannot be loaded.
+  final String? avatarFallbackUrl;
+
+  /// Text shown if neither [avatarUrl] nor [avatarFallbackUrl] can be loaded.
+  ///
+  /// Defaults to initials derived from [displayName].
+  final String? avatarFallbackText;
 
   /// Native WebRTC track identifier used by the iOS video-call PiP bridge.
   ///

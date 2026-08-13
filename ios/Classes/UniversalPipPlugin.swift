@@ -361,6 +361,8 @@ public class UniversalPipPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, 
         id: participant["id"] as? String ?? UUID().uuidString,
         displayName: participant["displayName"] as? String ?? "Participant",
         avatarUrl: participant["avatarUrl"] as? String,
+        avatarFallbackUrl: participant["avatarFallbackUrl"] as? String,
+        avatarFallbackText: participant["avatarFallbackText"] as? String,
         nativeVideoTrackId: participant["nativeVideoTrackId"] as? String,
         isLocal: participant["isLocal"] as? Bool ?? false,
         isCameraEnabled: participant["isCameraEnabled"] as? Bool ?? true
@@ -806,6 +808,8 @@ private struct NativePipParticipant {
   let id: String
   let displayName: String
   let avatarUrl: String?
+  let avatarFallbackUrl: String?
+  let avatarFallbackText: String?
   let nativeVideoTrackId: String?
   let isLocal: Bool
   let isCameraEnabled: Bool
@@ -815,6 +819,9 @@ private struct NativePipParticipant {
       id,
       nativeVideoTrackId ?? "",
       String(isLocal),
+      avatarUrl ?? "",
+      avatarFallbackUrl ?? "",
+      avatarFallbackText ?? "",
     ].joined(separator: ",")
   }
 }
@@ -938,6 +945,7 @@ private final class NativePipVideoCallView: UIView {
         for: remote,
         fallbackName: "Call"
       ),
+      avatarFallbackText: remote?.avatarFallbackText,
       isCameraEnabled: remote?.isCameraEnabled ?? false
     )
     localView?.update(
@@ -945,6 +953,7 @@ private final class NativePipVideoCallView: UIView {
         for: local,
         fallbackName: "You"
       ),
+      avatarFallbackText: local?.avatarFallbackText,
       isCameraEnabled: local?.isCameraEnabled ?? false
     )
   }
@@ -962,6 +971,9 @@ private final class NativePipVideoCallView: UIView {
     return NativePipParticipantTile(
       displayName: displayName,
       initials: initials(from: displayName),
+      avatarUrl: participant?.avatarUrl,
+      avatarFallbackUrl: participant?.avatarFallbackUrl,
+      avatarFallbackText: participant?.avatarFallbackText,
       isCameraEnabled: participant?.isCameraEnabled ?? false,
       isCompact: isCompact,
       videoTrackId: videoTrackId,
@@ -1009,6 +1021,7 @@ private final class NativePipParticipantTile: UIView {
   private let videoView: UIView?
   private let profileBackgroundColor: UIColor?
   private let initialsLabel = UILabel()
+  private let avatarImageView = UIImageView()
   private let nameLabel = UILabel()
   private let pausedOverlayView = UIVisualEffectView(
     effect: UIBlurEffect(style: .dark)
@@ -1017,10 +1030,14 @@ private final class NativePipParticipantTile: UIView {
   private let isCompact: Bool
   private var isCameraEnabled: Bool
   private var isPaused: Bool
+  private var avatarTask: URLSessionDataTask?
 
   init(
     displayName: String,
     initials: String,
+    avatarUrl: String?,
+    avatarFallbackUrl: String?,
+    avatarFallbackText: String?,
     isCameraEnabled: Bool,
     isCompact: Bool,
     videoTrackId: String?,
@@ -1045,13 +1062,22 @@ private final class NativePipParticipantTile: UIView {
       addSubview(videoView)
     }
 
-    initialsLabel.text = initials
+    initialsLabel.text = Self.resolvedFallbackText(
+      avatarFallbackText,
+      defaultText: initials
+    )
     initialsLabel.textColor = .white
     initialsLabel.textAlignment = .center
     initialsLabel.font = .systemFont(ofSize: isCompact ? 18 : 42, weight: .bold)
     initialsLabel.backgroundColor = profileBackgroundColor ?? UIColor.white.withAlphaComponent(0.14)
     initialsLabel.clipsToBounds = true
     addSubview(initialsLabel)
+
+    avatarImageView.contentMode = .scaleAspectFill
+    avatarImageView.clipsToBounds = true
+    avatarImageView.isHidden = true
+    addSubview(avatarImageView)
+    loadAvatar(from: [avatarUrl, avatarFallbackUrl])
 
     nameLabel.text = displayName
     nameLabel.textColor = UIColor.white.withAlphaComponent(0.92)
@@ -1071,6 +1097,7 @@ private final class NativePipParticipantTile: UIView {
   }
 
   deinit {
+    avatarTask?.cancel()
     if let videoView = videoView {
       UniversalPipWebRTCBridge.detachVideoView(videoView)
     }
@@ -1088,6 +1115,7 @@ private final class NativePipParticipantTile: UIView {
     let height = max(bounds.height, 1)
     let scale = min(width / 360, height / 640).clamped(to: 0.45...2)
     let hasVisibleVideo = videoView != nil && isCameraEnabled
+    let hasAvatarImage = avatarImageView.image != nil
     let shouldShowPausedOverlay = hasVisibleVideo && isPaused
     videoView?.frame = bounds
     let horizontalInset = min(max(width * 0.05, 4), 20)
@@ -1105,7 +1133,8 @@ private final class NativePipParticipantTile: UIView {
     nameLabel.font = .systemFont(ofSize: nameFontSize, weight: .semibold)
     nameLabel.textAlignment = hasVisibleVideo ? .natural : .center
     nameLabel.numberOfLines = !hasVisibleVideo && !isCompact ? 2 : 1
-    initialsLabel.isHidden = hasVisibleVideo
+    initialsLabel.isHidden = hasVisibleVideo || hasAvatarImage
+    avatarImageView.isHidden = hasVisibleVideo || !hasAvatarImage
     initialsLabel.frame = CGRect(
       x: (width - avatarSize) / 2,
       y: avatarY,
@@ -1113,6 +1142,8 @@ private final class NativePipParticipantTile: UIView {
       height: avatarSize
     )
     initialsLabel.layer.cornerRadius = avatarSize / 2
+    avatarImageView.frame = initialsLabel.frame
+    avatarImageView.layer.cornerRadius = avatarSize / 2
 
     let labelWidth = max(width - horizontalInset * 2, 1)
     let nameY = !hasVisibleVideo
@@ -1140,13 +1171,52 @@ private final class NativePipParticipantTile: UIView {
 
   func update(
     displayName: String,
+    avatarFallbackText: String?,
     isCameraEnabled: Bool
   ) {
     nameLabel.text = displayName
-    initialsLabel.text = NativePipParticipantTile.initials(from: displayName)
+    initialsLabel.text = Self.resolvedFallbackText(
+      avatarFallbackText,
+      defaultText: Self.initials(from: displayName)
+    )
     self.isCameraEnabled = isCameraEnabled
     videoView?.isHidden = !isCameraEnabled
     setNeedsLayout()
+  }
+
+  private func loadAvatar(from values: [String?]) {
+    let urls = values.compactMap { value -> URL? in
+      guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !value.isEmpty else { return nil }
+      return URL(string: value)
+    }
+    loadAvatar(from: urls, at: 0)
+  }
+
+  private func loadAvatar(from urls: [URL], at index: Int) {
+    guard index < urls.count else { return }
+    avatarTask = URLSession.shared.dataTask(with: urls[index]) { [weak self] data, response, _ in
+      let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 200
+      let image = data.flatMap(UIImage.init(data:))
+      DispatchQueue.main.async {
+        guard let self = self else { return }
+        if (200..<300).contains(statusCode), let image = image {
+          self.avatarImageView.image = image
+          self.setNeedsLayout()
+        } else {
+          self.loadAvatar(from: urls, at: index + 1)
+        }
+      }
+    }
+    avatarTask?.resume()
+  }
+
+  private static func resolvedFallbackText(
+    _ value: String?,
+    defaultText: String
+  ) -> String {
+    let text = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return text.isEmpty ? defaultText : text
   }
 
   private static func initials(from name: String) -> String {

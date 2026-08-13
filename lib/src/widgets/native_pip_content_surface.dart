@@ -149,7 +149,32 @@ class _AvatarFallback extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = _lettersFromName(participant.displayName);
+    final fallbackUrl = participant.avatarFallbackUrl?.trim();
+    if (fallbackUrl != null && fallbackUrl.isNotEmpty) {
+      return Image.network(
+        fallbackUrl,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) =>
+            _AvatarTextFallback(participant: participant, content: content),
+      );
+    }
+
+    return _AvatarTextFallback(participant: participant, content: content);
+  }
+}
+
+class _AvatarTextFallback extends StatelessWidget {
+  const _AvatarTextFallback({required this.participant, required this.content});
+
+  final PipParticipant participant;
+  final NativePipContent content;
+
+  @override
+  Widget build(BuildContext context) {
+    final configuredText = participant.avatarFallbackText?.trim();
+    final label = configuredText == null || configuredText.isEmpty
+        ? _lettersFromName(participant.displayName)
+        : configuredText;
 
     return Container(
       alignment: Alignment.center,

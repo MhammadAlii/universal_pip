@@ -126,8 +126,14 @@ class _UniversalPipState extends State<UniversalPip>
       return;
     }
 
+    // `inactive` fires for any transient loss of focus while the app stays
+    // fully visible (notification shade, quick settings, a system dialog,
+    // an incoming-call overlay, etc.) — treating it as "user is leaving"
+    // caused PiP to trigger on those too. `hidden`/`paused` only fire once
+    // the app is actually no longer visible, which is what auto-enter
+    // should key off.
     final shouldEnter =
-        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden ||
         state == AppLifecycleState.paused;
     if (shouldEnter) {
       unawaited(_enterSystemPipFromLifecycle());
