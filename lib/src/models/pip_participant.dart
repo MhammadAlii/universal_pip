@@ -5,6 +5,7 @@ class PipParticipant {
     required this.id,
     required this.displayName,
     this.avatarUrl,
+    this.avatarAuthToken,
     this.avatarFallbackUrl,
     this.avatarFallbackText,
     this.nativeVideoTrackId,
@@ -18,6 +19,13 @@ class PipParticipant {
   final String id;
   final String displayName;
   final String? avatarUrl;
+
+  /// Bearer token sent with [avatarUrl] and [avatarFallbackUrl].
+  ///
+  /// Profile endpoints are often authenticated, so the URL alone is not
+  /// fetchable. Supplied by the host app, used only as an `Authorization`
+  /// header on the avatar request, and never persisted.
+  final String? avatarAuthToken;
 
   /// Image shown if [avatarUrl] is absent or cannot be loaded.
   final String? avatarFallbackUrl;

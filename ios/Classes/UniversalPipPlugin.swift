@@ -361,6 +361,7 @@ public class UniversalPipPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, 
         id: participant["id"] as? String ?? UUID().uuidString,
         displayName: participant["displayName"] as? String ?? "Participant",
         avatarUrl: participant["avatarUrl"] as? String,
+        avatarAuthToken: participant["avatarAuthToken"] as? String,
         avatarFallbackUrl: participant["avatarFallbackUrl"] as? String,
         avatarFallbackText: participant["avatarFallbackText"] as? String,
         nativeVideoTrackId: participant["nativeVideoTrackId"] as? String,
@@ -808,6 +809,7 @@ private struct NativePipParticipant {
   let id: String
   let displayName: String
   let avatarUrl: String?
+  let avatarAuthToken: String?
   let avatarFallbackUrl: String?
   let avatarFallbackText: String?
   let nativeVideoTrackId: String?
@@ -972,6 +974,7 @@ private final class NativePipVideoCallView: UIView {
       displayName: displayName,
       initials: initials(from: displayName),
       avatarUrl: participant?.avatarUrl,
+      avatarAuthToken: participant?.avatarAuthToken,
       avatarFallbackUrl: participant?.avatarFallbackUrl,
       avatarFallbackText: participant?.avatarFallbackText,
       isCameraEnabled: participant?.isCameraEnabled ?? false,
@@ -1036,6 +1039,7 @@ private final class NativePipParticipantTile: UIView {
     displayName: String,
     initials: String,
     avatarUrl: String?,
+    avatarAuthToken: String?,
     avatarFallbackUrl: String?,
     avatarFallbackText: String?,
     isCameraEnabled: Bool,
@@ -1077,7 +1081,7 @@ private final class NativePipParticipantTile: UIView {
     avatarImageView.clipsToBounds = true
     avatarImageView.isHidden = true
     addSubview(avatarImageView)
-    loadAvatar(from: [avatarUrl, avatarFallbackUrl])
+    loadAvatar(from: [avatarUrl, avatarFallbackUrl], authToken: avatarAuthToken)
 
     nameLabel.text = displayName
     nameLabel.textColor = UIColor.white.withAlphaComponent(0.92)
@@ -1184,27 +1188,53 @@ private final class NativePipParticipantTile: UIView {
     setNeedsLayout()
   }
 
-  private func loadAvatar(from values: [String?]) {
+  private func loadAvatar(from values: [String?], authToken: String?) {
     let urls = values.compactMap { value -> URL? in
       guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
             !value.isEmpty else { return nil }
+      NSLog("[PipAvatar] ios candidate=%@", value)
       return URL(string: value)
     }
-    loadAvatar(from: urls, at: 0)
+
+    let token = authToken?.trimmingCharacters(in: .whitespacesAndNewlines)
+    NSLog(
+      "[PipAvatar] ios sources=%d authorized=%@",
+      urls.count,
+      (token?.isEmpty == false) ? "true" : "false"
+    )
+
+    if urls.isEmpty {
+      NSLog("[PipAvatar] ios no usable avatar source; keeping initials")
+    }
+    loadAvatar(from: urls, at: 0, authToken: token)
   }
 
-  private func loadAvatar(from urls: [URL], at index: Int) {
+  private func loadAvatar(from urls: [URL], at index: Int, authToken: String?) {
     guard index < urls.count else { return }
-    avatarTask = URLSession.shared.dataTask(with: urls[index]) { [weak self] data, response, _ in
+
+    var request = URLRequest(url: urls[index])
+    // Profile endpoints are usually authenticated; the host app supplies the
+    // token because only it knows how the image is protected.
+    if let token = authToken, !token.isEmpty {
+      request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    }
+
+    avatarTask = URLSession.shared.dataTask(with: request) { [weak self] data, response, _ in
       let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 200
       let image = data.flatMap(UIImage.init(data:))
       DispatchQueue.main.async {
         guard let self = self else { return }
         if (200..<300).contains(statusCode), let image = image {
+          NSLog("[PipAvatar] ios loaded status=%d", statusCode)
           self.avatarImageView.image = image
           self.setNeedsLayout()
         } else {
-          self.loadAvatar(from: urls, at: index + 1)
+          NSLog(
+            "[PipAvatar] ios failed status=%d url=%@",
+            statusCode,
+            urls[index].absoluteString
+          )
+          self.loadAvatar(from: urls, at: index + 1, authToken: authToken)
         }
       }
     }

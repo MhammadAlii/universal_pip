@@ -141,6 +141,7 @@ class MethodChannelUniversalPip extends UniversalPipPlatform {
                 'id': participant.id,
                 'displayName': participant.displayName,
                 'avatarUrl': participant.avatarUrl,
+                'avatarAuthToken': participant.avatarAuthToken,
                 'avatarFallbackUrl': participant.avatarFallbackUrl,
                 'avatarFallbackText': participant.avatarFallbackText,
                 'nativeVideoTrackId': participant.nativeVideoTrackId,

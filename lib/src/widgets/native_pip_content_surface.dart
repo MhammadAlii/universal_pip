@@ -3,6 +3,40 @@ import 'package:flutter/material.dart';
 import '../models/native_pip_content.dart';
 import '../models/pip_participant.dart';
 
+/// Shows [source], attaching [authToken] when the endpoint requires one.
+///
+/// Profile URLs are frequently authenticated; without the header the request
+/// comes back 401 and the caller only ever sees the fallback.
+Widget _sourceImage(
+  String source, {
+  String? authToken,
+  required WidgetBuilder onError,
+}) {
+  final value = source.trim();
+  final token = authToken?.trim();
+  final headers = token == null || token.isEmpty
+      ? null
+      : <String, String>{'Authorization': 'Bearer $token'};
+
+  debugPrint(
+    '[PipAvatar] flutter source=$value authorized=${headers != null}',
+  );
+
+  return Image.network(
+    value,
+    fit: BoxFit.cover,
+    headers: headers,
+    frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+      if (frame == 0) debugPrint('[PipAvatar] flutter loaded source=$value');
+      return child;
+    },
+    errorBuilder: (context, error, stackTrace) {
+      debugPrint('[PipAvatar] flutter failed source=$value error=$error');
+      return onError(context);
+    },
+  );
+}
+
 class NativePipContentSurface extends StatelessWidget {
   const NativePipContentSurface({required this.content, super.key});
 
@@ -36,10 +70,9 @@ class _VideoPlayerSurface extends StatelessWidget {
 
     final posterUrl = content.posterUrl;
     if (posterUrl != null && posterUrl.isNotEmpty) {
-      return Image.network(
+      return _sourceImage(
         posterUrl,
-        fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) =>
+        onError: (context) =>
             _TextFallback(title: content.title, subtitle: content.subtitle),
       );
     }
@@ -129,10 +162,10 @@ class _ParticipantTile extends StatelessWidget {
 
     final avatarUrl = participant.avatarUrl;
     if (avatarUrl != null && avatarUrl.isNotEmpty) {
-      return Image.network(
+      return _sourceImage(
         avatarUrl,
-        fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) =>
+        authToken: participant.avatarAuthToken,
+        onError: (context) =>
             _AvatarFallback(participant: participant, content: content),
       );
     }
@@ -151,10 +184,10 @@ class _AvatarFallback extends StatelessWidget {
   Widget build(BuildContext context) {
     final fallbackUrl = participant.avatarFallbackUrl?.trim();
     if (fallbackUrl != null && fallbackUrl.isNotEmpty) {
-      return Image.network(
+      return _sourceImage(
         fallbackUrl,
-        fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) =>
+        authToken: participant.avatarAuthToken,
+        onError: (context) =>
             _AvatarTextFallback(participant: participant, content: content),
       );
     }
