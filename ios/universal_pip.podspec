@@ -19,7 +19,12 @@ Android system PiP, and safe iOS/web fallbacks.
     'universal_pip_privacy' => ['Resources/PrivacyInfo.xcprivacy']
   }
   s.dependency 'Flutter'
-  s.dependency 'WebRTC-SDK', '144.7559.09'
+  # Version intentionally unconstrained: the host app (via flutter_webrtc) owns the
+  # WebRTC-SDK version. Pinning here causes an unresolvable CocoaPods conflict
+  # whenever the app's flutter_webrtc pins a different build. This plugin only
+  # needs the headers to compile; it resolves everything at runtime through the
+  # app's FlutterWebRTCPlugin singleton.
+  s.dependency 'WebRTC-SDK'
   s.platform = :ios, '13.0'
 
   # Flutter.framework does not contain a i386 slice.
