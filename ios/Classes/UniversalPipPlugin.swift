@@ -192,12 +192,20 @@ public class UniversalPipPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, 
     }
 
     do {
+      // The host app owns the call audio session: its category options carry the
+      // output route the user picked. Re-applying a category here drops that --
+      // `[.allowBluetooth, .allowBluetoothA2DP]` without `.defaultToSpeaker`
+      // re-elects a headset over a speaker the user chose, and this method runs
+      // on every PiP content refresh. So configure the session only when the
+      // host has not already put it in a call category.
       let audioSession = AVAudioSession.sharedInstance()
-      try audioSession.setCategory(
-        .playAndRecord,
-        mode: .videoChat,
-        options: [.allowBluetooth, .allowBluetoothA2DP]
-      )
+      if audioSession.category != .playAndRecord {
+        try audioSession.setCategory(
+          .playAndRecord,
+          mode: .videoChat,
+          options: [.allowBluetooth, .allowBluetoothA2DP]
+        )
+      }
       try audioSession.setActive(true)
     } catch {
       setLastError("Could not keep the iOS call audio session active for PiP: \(error.localizedDescription)")
@@ -529,8 +537,9 @@ public class UniversalPipPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, 
       prepareToStartPictureInPicture(player: player, controller: controller, result: result)
       return
     }
-
-    activateAudioSession(category: .playAndRecord, mode: .videoChat)
+    if AVAudioSession.sharedInstance().category != .playAndRecord {
+      activateAudioSession(category: .playAndRecord, mode: .videoChat)
+    }
     startPictureInPicture(controller: controller, result: result)
   }
 
