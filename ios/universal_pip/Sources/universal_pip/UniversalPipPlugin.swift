@@ -3,6 +3,14 @@ import AVFoundation
 import AVKit
 import UIKit
 
+// Its own module under Swift Package Manager, where Swift and Objective-C
+// cannot share a target. Under CocoaPods the bridge compiles into the same pod
+// and its header arrives through the umbrella header, so there is nothing to
+// import and the module does not exist.
+#if canImport(universal_pip_bridge)
+import universal_pip_bridge
+#endif
+
 public class UniversalPipPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, AVPictureInPictureControllerDelegate {
   private var eventSink: FlutterEventSink?
   private var pipController: AVPictureInPictureController?

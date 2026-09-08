@@ -14,9 +14,12 @@ Android system PiP, and safe iOS/web fallbacks.
   s.license          = { :file => '../LICENSE' }
   s.author           = { 'Your Company' => 'email@example.com' }
   s.source           = { :path => '.' }
-  s.source_files = 'Classes/**/*.{swift,h,m}'
+  # Shared with the Swift package in `universal_pip/`, so a CocoaPods app and a
+  # Swift Package Manager app build the exact same sources.
+  s.source_files = 'universal_pip/Sources/**/*.{swift,h,m}'
+  s.public_header_files = 'universal_pip/Sources/universal_pip_bridge/include/**/*.h'
   s.resource_bundles = {
-    'universal_pip_privacy' => ['Resources/PrivacyInfo.xcprivacy']
+    'universal_pip_privacy' => ['universal_pip/Sources/universal_pip/Resources/PrivacyInfo.xcprivacy']
   }
   s.dependency 'Flutter'
   # Version intentionally unconstrained: the host app (via flutter_webrtc) owns the

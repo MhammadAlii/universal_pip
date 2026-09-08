@@ -14,6 +14,11 @@ dependencies:
     sdk: flutter
   web: ^1.0.0
   plugin_platform_interface: ^2.0.2
+  # The iOS bridge compiles against the WebRTC headers and consumes the
+  # `WebRTC` product this package exports, so the dependency is explicit rather
+  # than assumed to be present in the host app. 1.6.0 is the first version to
+  # export that product.
+  flutter_webrtc: ^1.6.0
 
 dev_dependencies:
   flutter_test:
