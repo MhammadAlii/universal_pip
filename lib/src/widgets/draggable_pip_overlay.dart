@@ -59,7 +59,7 @@ class _DraggablePipOverlayState extends State<DraggablePipOverlay> {
                 left: offset.dx,
                 top: offset.dy,
                 child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
+                  behavior: HitTestBehavior.deferToChild,
                   onPanStart: (_) {
                     _dragStartOffset = _offset ?? offset;
                     setState(() => _isDragging = true);
