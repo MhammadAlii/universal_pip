@@ -133,6 +133,21 @@ Or configure lifecycle auto-entry:
 UniversalPipConfig(autoEnterSystemPip: true)
 ```
 
+On Android, the native back button can also enter system PiP while the in-app
+bubble is showing and the app's navigators have nothing left to pop:
+
+```dart
+UniversalPipConfig(enterSystemPipOnBack: true)
+```
+
+Android's own auto-enter only reacts to Home/Recents, and the lifecycle
+auto-entry runs after the app has already left the screen, so a back press on
+the root screen would otherwise send the app away without PiP. With this
+option the widget keeps the back event in Flutter while the bubble is visible
+(it also covers predictive back, `enableOnBackInvokedCallback`) and enters
+system PiP before the app leaves. Any other back press — a route, sheet or
+dialog that can pop, or a `PopScope` that blocks it — behaves as usual.
+
 When system PiP exits, the controller restores the saved target mode:
 
 - entered from `showForeground(...)` -> restores `foreground`

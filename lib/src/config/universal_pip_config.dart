@@ -9,6 +9,7 @@ class UniversalPipConfig {
     this.preRenderSystemSurfaceBeforeSystemPip = true,
     this.androidSeamlessResize = true,
     this.androidAutoEnterOnUserLeave = true,
+    this.enterSystemPipOnBack = false,
     this.initialBounds,
     this.initialSize = const Size(144, 256),
     this.minSize = const Size(96, 96),
@@ -27,6 +28,7 @@ class UniversalPipConfig {
   final bool preRenderSystemSurfaceBeforeSystemPip;
   final bool androidSeamlessResize;
   final bool androidAutoEnterOnUserLeave;
+  final bool enterSystemPipOnBack;
   final Rect? initialBounds;
   final Size initialSize;
   final Size minSize;

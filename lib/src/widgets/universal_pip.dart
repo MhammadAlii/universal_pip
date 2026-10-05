@@ -3,6 +3,7 @@ import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../config/universal_pip_config.dart';
 import '../controller/universal_pip_controller.dart';
@@ -70,6 +71,7 @@ class _UniversalPipState extends State<UniversalPip>
   bool _isAutoEnteringSystemPip = false;
   bool _isPreparingSystemPip = false;
   bool _hasPendingSystemPipPreparation = false;
+  bool _navigatorCanHandlePop = false;
   Object? _lastWebDocumentPipWindow;
 
   @override
@@ -88,6 +90,51 @@ class _UniversalPipState extends State<UniversalPip>
       widget.controller.addListener(_handleControllerChanged);
     }
     _configureWebAutoEntry();
+    if (oldWidget.config.enterSystemPipOnBack !=
+            widget.config.enterSystemPipOnBack ||
+        oldWidget.config.enableSystemPip != widget.config.enableSystemPip) {
+      _syncFrameworkHandlesBack();
+    }
+  }
+
+  bool get _handlesBackForSystemPip {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      return false;
+    }
+    final state = widget.controller.state;
+    return widget.config.enterSystemPipOnBack &&
+        widget.config.enableSystemPip &&
+        state.isInApp &&
+        !state.isSystemPipActive &&
+        !state.isTransitioning;
+  }
+
+  bool _handleNavigationNotification(NavigationNotification notification) {
+    _navigatorCanHandlePop = notification.canHandlePop;
+    if (!widget.config.enterSystemPipOnBack) return false;
+    _syncFrameworkHandlesBack();
+    return true;
+  }
+
+  void _syncFrameworkHandlesBack() {
+    if (!widget.config.enterSystemPipOnBack) return;
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    if (lifecycle == null || lifecycle == AppLifecycleState.detached) return;
+    SystemNavigator.setFrameworkHandlesBack(
+      _navigatorCanHandlePop || _handlesBackForSystemPip,
+    );
+  }
+
+  @override
+  Future<bool> didPopRoute() async {
+    if (!_handlesBackForSystemPip || _navigatorCanHandlePop) return false;
+    return widget.controller.enterSystemPip(
+      aspectRatio: widget.config.aspectRatio,
+      preRenderSystemSurface:
+          widget.config.preRenderSystemSurfaceBeforeSystemPip,
+      androidSeamlessResize: widget.config.androidSeamlessResize,
+      androidAutoEnterOnUserLeave: widget.config.androidAutoEnterOnUserLeave,
+    );
   }
 
   @override
@@ -133,8 +180,7 @@ class _UniversalPipState extends State<UniversalPip>
     // the app is actually no longer visible, which is what auto-enter
     // should key off.
     final shouldEnter =
-        state == AppLifecycleState.hidden ||
-        state == AppLifecycleState.paused;
+        state == AppLifecycleState.hidden || state == AppLifecycleState.paused;
     if (shouldEnter) {
       unawaited(_enterSystemPipFromLifecycle());
     }
@@ -201,7 +247,10 @@ class _UniversalPipState extends State<UniversalPip>
       child: Stack(
         fit: StackFit.expand,
         children: [
-          widget.child,
+          NotificationListener<NavigationNotification>(
+            onNotification: _handleNavigationNotification,
+            child: widget.child,
+          ),
           if (state.isTransitioning && widget.config.transitionBlurSigma > 0)
             _buildTransitionBackdrop(),
           if (showSystemSurface)
@@ -354,6 +403,7 @@ class _UniversalPipState extends State<UniversalPip>
   void _handleControllerChanged() {
     unawaited(_prepareSystemPip());
     _renderWebDocumentPip();
+    _syncFrameworkHandlesBack();
     if (mounted) setState(() {});
   }
 
