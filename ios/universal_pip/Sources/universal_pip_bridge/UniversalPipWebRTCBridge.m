@@ -47,7 +47,8 @@ static void UniversalPipWebRTCDebug(NSString *message) {
   self = [super init];
   if (self) {
     _displayLayer = displayLayer;
-    _displayLayer.videoGravity = AVLayerVideoGravityResizeAspectFill;
+    _displayLayer.videoGravity = AVLayerVideoGravityResizeAspect;
+    _displayLayer.backgroundColor = UIColor.blackColor.CGColor;
     _renderQueue = dispatch_queue_create("com.mo_dev.universal_pip.webrtc_frames", DISPATCH_QUEUE_SERIAL);
     _lastPresentationTime = kCMTimeInvalid;
     _trackId = [trackId copy];
@@ -260,6 +261,7 @@ static void UniversalPipWebRTCDebug(NSString *message) {
   }
 
   UniversalPipSampleBufferView *videoView = [[UniversalPipSampleBufferView alloc] initWithFrame:CGRectZero];
+  videoView.backgroundColor = UIColor.blackColor;
   UniversalPipSampleBufferRenderer *renderer = [
     [UniversalPipSampleBufferRenderer alloc]
       initWithDisplayLayer:videoView.sampleBufferDisplayLayer
