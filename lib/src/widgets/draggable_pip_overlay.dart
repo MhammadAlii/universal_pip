@@ -205,12 +205,18 @@ class _DraggablePipOverlayState extends State<DraggablePipOverlay> {
     final viewPadding = mediaQuery.viewPadding;
     final padding = mediaQuery.padding;
     final gestureInsets = mediaQuery.systemGestureInsets;
+    final keyboard = mediaQuery.viewInsets.bottom;
+    final bottom = _max3(
+      viewPadding.bottom,
+      padding.bottom,
+      gestureInsets.bottom,
+    );
 
     return EdgeInsets.fromLTRB(
       _max3(viewPadding.left, padding.left, gestureInsets.left),
       _max3(viewPadding.top, padding.top, gestureInsets.top),
       _max3(viewPadding.right, padding.right, gestureInsets.right),
-      _max3(viewPadding.bottom, padding.bottom, gestureInsets.bottom),
+      keyboard > bottom ? keyboard : bottom,
     );
   }
 
