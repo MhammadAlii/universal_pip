@@ -230,6 +230,28 @@ public class UniversalPipPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, 
       return
     }
 
+    if let callViewController = callViewController,
+       pipController != nil,
+       player == nil {
+      callViewController.loadViewIfNeeded()
+      callContentView = nil
+      configureVideoCallView(
+        callViewController.view,
+        participants: participants,
+        backgroundColor: backgroundColor,
+        fallbackBackgroundColor: fallbackBackgroundColor,
+        profileBackgroundColor: profileBackgroundColor,
+        localPreviewWidthRatio: localPreviewWidthRatio,
+        localPreviewAspectRatio: configuredAspectRatio,
+        isLocalCameraLiveInPipSupported: isLocalCameraLiveInPipSupported
+      )
+      callViewController.preferredContentSize = preferredContentSize ??
+        contentSize(for: configuredAspectRatio)
+      activeContentKey = contentKey
+      lastError = nil
+      return
+    }
+
     clearNativeContent(emitInactive: false)
 
     guard let sourceView = attachCallSourceView() else {
